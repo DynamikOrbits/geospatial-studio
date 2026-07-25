@@ -152,7 +152,8 @@ import {
   refreshSqlQueryLayer,
 } from "../../lib/sql-query-layer";
 import { requestSqlWorkspaceQuery } from "../../lib/sql-workspace-prefill";
-import { canExportRasterLayer, exportRasterLayer } from "../../lib/raster-export";
+import { canExportRasterLayer, exportRasterLayer, rasterExportUrl } from "../../lib/raster-export";
+import { readRasterInfo, type RasterInfo } from "../../lib/raster-info";
 import { canExtractRasterSubset } from "../../lib/raster-subset-export";
 import {
   exportVectorLayer,
@@ -312,9 +313,48 @@ function canWriteEditsToSource(layer: GeoLibreLayer): boolean {
   return ext ? WRITEBACK_EXTENSIONS.includes(ext) : false;
 }
 
-function layerMetadataPayload(layer: GeoLibreLayer): Record<string, unknown> {
+/**
+ * Async state of the GeoTIFF header read that backs the raster section of the
+ * metadata dialog. `layerId` scopes the state to the layer it was read for:
+ * the dialog re-renders for a newly opened layer before the effect below can
+ * restart the read, so without it the previous layer's header would show for a
+ * frame under the new layer's name.
+ */
+type RasterInfoState = { layerId: string } & (
+  | { status: "loading" }
+  | { status: "ready"; info: RasterInfo }
+  | { status: "error" }
+);
+
+/**
+ * Whether a layer's metadata can be enriched with GeoTIFF header facts: a
+ * raster layer whose bytes are reachable as a single file (a remote COG or a
+ * retained local-bytes blob). Tile-template rasters have no such file.
+ *
+ * @param layer - The layer whose metadata dialog is open.
+ * @returns A fetchable GeoTIFF URL, or null.
+ */
+function rasterInfoUrl(layer: GeoLibreLayer): string | null {
+  if (layer.type !== "cog" && layer.type !== "raster") return null;
+  return rasterExportUrl(layer);
+}
+
+/**
+ * Builds the JSON payload shown in the layer metadata dialog. Raster header
+ * facts (CRS, pixel size, storage) lead when they have been read, since the
+ * store metadata below them only knows the WGS84 bounds and band count.
+ *
+ * @param layer - The layer whose metadata is shown.
+ * @param rasterInfo - GeoTIFF header facts, when read for this layer.
+ * @returns The payload to serialize into the dialog.
+ */
+function layerMetadataPayload(
+  layer: GeoLibreLayer,
+  rasterInfo?: RasterInfo | null,
+): Record<string, unknown> {
   const videoSourceUrls = sourceUrlsFromLayer(layer);
   return {
+    ...(rasterInfo ? { raster: rasterInfo } : {}),
     ...layer.metadata,
     layerName: layer.name,
     layerType: layer.type,
@@ -545,6 +585,23 @@ export function LayerPanel({
   const [editingName, setEditingName] = useState("");
   const [basemapPickerOpen, setBasemapPickerOpen] = useState(false);
   const [metadataLayer, setMetadataLayer] = useState<GeoLibreLayer | null>(null);
+  // GeoTIFF header facts (CRS, pixel size, storage) for the raster whose
+  // metadata dialog is open. The store layer does not carry them, so they are
+  // read from the file on open (#1420): "loading" while the header is being
+  // fetched, "error" when it cannot be read.
+  const [rasterInfoState, setRasterInfoState] = useState<RasterInfoState | null>(null);
+  // Explicit metadata dialog size once the user drags the corner grip (null =
+  // the default responsive size). Kept across open/close so a size chosen for
+  // one layer still applies to the next. `metadataDialogRef` reads the live
+  // element size at the start of a drag; `metadataResizeCleanupRef` tears down
+  // the listeners on unmount.
+  const metadataDialogRef = useRef<HTMLDivElement>(null);
+  const [metadataDialogSize, setMetadataDialogSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const metadataResizeCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => metadataResizeCleanupRef.current?.(), []);
   const [layerPendingRemoval, setLayerPendingRemoval] = useState<GeoLibreLayer | null>(null);
   const [refreshSettingsLayerId, setRefreshSettingsLayerId] = useState<string | null>(null);
   const [refreshStatuses, setRefreshStatuses] = useState<Record<string, LayerRefreshStatus>>({});
@@ -650,6 +707,66 @@ export function LayerPanel({
     () => layerGroups.filter((g) => !firstMemberIdByGroup.has(g.id)),
     [layerGroups, firstMemberIdByGroup],
   );
+  // Resize the metadata dialog from its bottom-end grip. The dialog is centred
+  // via a -50% transform, so each edge moves by half the size change; growing
+  // by 2x the pointer delta keeps the grip under the cursor. In an RTL layout
+  // the grip renders on the physical left, so the horizontal delta is inverted
+  // (the same idiom as the Basemap Extract panel's grip).
+  const startMetadataResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const el = metadataDialogRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const isRtl = document.documentElement.dir === "rtl";
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startW = rect.width;
+    const startH = rect.height;
+    let next = { width: startW, height: startH };
+    let frame: number | null = null;
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = isRtl ? "nesw-resize" : "nwse-resize";
+    document.body.style.userSelect = "none";
+
+    const onMove = (e: PointerEvent) => {
+      const deltaX = (e.clientX - startX) * (isRtl ? -1 : 1);
+      next = {
+        width: Math.max(320, Math.min(window.innerWidth - 16, startW + deltaX * 2)),
+        height: Math.max(240, Math.min(window.innerHeight - 16, startH + (e.clientY - startY) * 2)),
+      };
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        setMetadataDialogSize(next);
+      });
+    };
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+      metadataResizeCleanupRef.current = null;
+    };
+    const onUp = () => {
+      cleanup();
+      setMetadataDialogSize(next);
+    };
+    metadataResizeCleanupRef.current = cleanup;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }, []);
+
+  // The header read scoped to the layer whose metadata dialog is open. A state
+  // left over from a previously inspected layer is ignored rather than shown
+  // under the new layer's name.
+  const metadataRasterInfo =
+    rasterInfoState && rasterInfoState.layerId === metadataLayer?.id ? rasterInfoState : null;
   const refreshSettingsLayer = refreshSettingsLayerId
     ? (layers.find((layer) => layer.id === refreshSettingsLayerId) ?? null)
     : null;
@@ -1619,6 +1736,35 @@ export function LayerPanel({
         : "",
     );
   }, [refreshSettingsLayerId, refreshSettingsIntervalMs]);
+
+  // Read the GeoTIFF header behind an open raster metadata dialog so it can
+  // report the native CRS and pixel size the store layer never captured
+  // (#1420). Only the header is fetched, and the result is dropped when the
+  // dialog closes or moves to another layer while the read is in flight.
+  useEffect(() => {
+    const url = metadataLayer ? rasterInfoUrl(metadataLayer) : null;
+    if (!metadataLayer || !url) {
+      setRasterInfoState(null);
+      return;
+    }
+
+    const layerId = metadataLayer.id;
+    let cancelled = false;
+    setRasterInfoState({ layerId, status: "loading" });
+    void readRasterInfo(url)
+      .then((info) => {
+        if (!cancelled) setRasterInfoState({ layerId, status: "ready", info });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        console.warn("[GeoLibre] Failed to read raster metadata", error);
+        setRasterInfoState({ layerId, status: "error" });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [metadataLayer]);
 
   useEffect(() => {
     const activeLayerIds = new Set<string>();
@@ -3244,16 +3390,71 @@ export function LayerPanel({
           if (!open) setMetadataLayer(null);
         }}
       >
-        <DialogContent>
+        <DialogContent
+          ref={metadataDialogRef}
+          style={
+            metadataDialogSize
+              ? {
+                  width: metadataDialogSize.width,
+                  height: metadataDialogSize.height,
+                  // Only the width cap is lifted (to the viewport, not to
+                  // `none`): a size chosen on a wide window must not leave the
+                  // dialog clipped once the window narrows. The height keeps
+                  // DialogContent's own viewport cap.
+                  maxWidth: "calc(100vw - 1rem)",
+                }
+              : undefined
+          }
+          bodyClassName="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6"
+          resizeHandle={
+            <div
+              role="separator"
+              aria-label={t("layers.resizeMetadataDialog")}
+              title={t("layers.resizeMetadataDialog")}
+              onPointerDown={startMetadataResize}
+              className="absolute bottom-0 end-0 z-10 hidden h-5 w-5 cursor-nwse-resize touch-none select-none text-muted-foreground hover:text-foreground md:block rtl:cursor-nesw-resize"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                className="h-full w-full rtl:scale-x-[-1]"
+                aria-hidden="true"
+              >
+                <path
+                  d="M11 15L15 11M6 15L15 6"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
+          }
+        >
           <DialogHeader>
             <DialogTitle>
               {t("layers.metadataDialogTitle", { name: metadataLayer?.name })}
             </DialogTitle>
             <DialogDescription>{t("layers.metadataDialogDescription")}</DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-80">
+          {metadataRasterInfo && metadataRasterInfo.status !== "ready" && (
+            <p className="text-xs text-muted-foreground">
+              {metadataRasterInfo.status === "loading"
+                ? t("layers.metadataRasterLoading")
+                : t("layers.metadataRasterError")}
+            </p>
+          )}
+          {/* Capped at a readable height until the user resizes the dialog,
+              after which the payload fills whatever height they chose. */}
+          <ScrollArea className={cn("min-h-0", metadataDialogSize ? "flex-1" : "max-h-80")}>
             <pre className="whitespace-pre-wrap break-all text-xs">
-              {metadataLayer && JSON.stringify(layerMetadataPayload(metadataLayer), null, 2)}
+              {metadataLayer &&
+                JSON.stringify(
+                  layerMetadataPayload(
+                    metadataLayer,
+                    metadataRasterInfo?.status === "ready" ? metadataRasterInfo.info : null,
+                  ),
+                  null,
+                  2,
+                )}
             </pre>
           </ScrollArea>
         </DialogContent>
