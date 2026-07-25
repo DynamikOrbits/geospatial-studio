@@ -8,7 +8,7 @@ pull request workflow, lives in the documentation:
 
 ## Quick Start
 
-Fork the repository, then clone your fork — replace `YOUR_GITHUB_USERNAME` with
+Fork the repository, then clone your fork. Replace `YOUR_GITHUB_USERNAME` with
 your GitHub username:
 
 ```bash

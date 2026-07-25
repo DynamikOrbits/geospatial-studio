@@ -7,7 +7,7 @@ typo to adding a new processing tool or plugin.
 
 By participating, you agree to keep interactions respectful and constructive.
 
-## Ways to contribute
+## Ways to Contribute
 
 - **Report a bug or request a feature** by opening an
   [issue](https://github.com/opengeos/GeoLibre/issues). Include steps to
@@ -33,7 +33,7 @@ before you invest time in a pull request.
 
 ## Setup
 
-Fork the repository, then clone your fork — replace `YOUR_GITHUB_USERNAME` with
+Fork the repository, then clone your fork. Replace `YOUR_GITHUB_USERNAME` with
 your GitHub username:
 
 ```bash
