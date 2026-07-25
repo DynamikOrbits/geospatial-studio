@@ -1,4 +1,4 @@
-import type { DashboardWidget } from "@geolibre/core";
+import type { DashboardWidget, IndicatorAggregation } from "@geolibre/core";
 import { MAX_DASHBOARD_COLUMNS, MIN_DASHBOARD_COLUMNS, useAppStore } from "@geolibre/core";
 import { Button, Select } from "@geolibre/ui";
 import {
@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { numericValues, type ChartRow, type ChartType } from "../../lib/attribute-charts";
 import { isChartableLayer, useLayerChartData } from "../../hooks/useLayerChartData";
 import { ChartView, computeChart, type ChartSpec } from "./charts/chart-view";
 import { WidgetEditorDialog } from "./WidgetEditorDialog";
@@ -27,10 +28,54 @@ const DEFAULT_DASHBOARD_HEIGHT = 360;
 // fills and resizes with the panel height (issue #728).
 const MIN_DASHBOARD_ROW_HEIGHT = 200;
 
-/** Turn a stored widget into the render-side {@link ChartSpec}. */
-function widgetToSpec(widget: DashboardWidget): ChartSpec {
+/** Compute the indicator value from layer data and an aggregation. Returns
+ * null when there is no numeric data to aggregate. Count works on any layer. */
+function computeIndicator(
+  rows: ChartRow[],
+  field: string | undefined,
+  aggregation: IndicatorAggregation,
+): number | null {
+  if (aggregation === "count") {
+    return rows.length;
+  }
+  if (!field) return null;
+  // Reuse the shared coercion so numeric strings count, as they do in the charts.
+  const values = numericValues(rows, field);
+  if (values.length === 0) return null;
+  switch (aggregation) {
+    case "sum":
+      return values.reduce((a, b) => a + b, 0);
+    case "mean":
+      return values.reduce((a, b) => a + b, 0) / values.length;
+    case "min":
+      return Math.min(...values);
+    case "max":
+      return Math.max(...values);
+    case "median": {
+      const sorted = [...values].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+    default:
+      return null;
+  }
+}
+
+/** Format a number for display in the indicator tile. Large numbers get
+ * locale-aware grouping; small numbers keep up to 2 decimal places. */
+function formatIndicatorValue(value: number): string {
+  if (Number.isInteger(value)) {
+    return value.toLocaleString();
+  }
+  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+/** Turn a stored widget into the render-side {@link ChartSpec}. An indicator is
+ * a KPI tile rather than a chart, so the caller passes the narrowed chart type
+ * and skips this for `"indicator"` widgets. */
+function widgetToSpec(widget: DashboardWidget, type: ChartType): ChartSpec {
   return {
-    type: widget.type,
+    type,
     field: widget.field,
     xField: widget.xField,
     yField: widget.yField,
@@ -328,7 +373,13 @@ function WidgetCard({
 }) {
   const { t } = useTranslation();
   const data = useLayerChartData(widget.layerId);
-  const result = useMemo(() => computeChart(data.rows, widgetToSpec(widget)), [data.rows, widget]);
+  const result = useMemo(
+    () =>
+      widget.type === "indicator"
+        ? null
+        : computeChart(data.rows, widgetToSpec(widget, widget.type)),
+    [data.rows, widget],
+  );
   // A readable title from the widget's chart type and fields when untitled.
   const defaultWidgetTitle = (): string => {
     switch (widget.type) {
@@ -351,6 +402,11 @@ function WidgetCard({
         return `${t("dashboard.chartType.box")} · ${widget.field ?? ""}`;
       case "pie":
         return `${t("dashboard.chartType.pie")} · ${widget.category ?? ""}`;
+      case "indicator": {
+        const agg = widget.indicatorAggregation ?? "count";
+        const aggLabel = t(`dashboard.indicatorAggregation.${agg}`);
+        return widget.field ? `${aggLabel} · ${widget.field}` : aggLabel;
+      }
     }
   };
   const title = widget.title?.trim() || defaultWidgetTitle();
@@ -412,19 +468,45 @@ function WidgetCard({
         </div>
       </div>
 
-      {/* [&>svg] targets ChartView's chart SVG, which is a direct DOM child
-          (React Fragments emit no nodes): it flexes to fill, min-h-0 lets it
-          shrink past its intrinsic aspect-ratio height, and preserveAspectRatio
-          letterboxes it. Update this if a chart ever wraps its SVG (issue #728). */}
-      <div className="flex min-h-0 flex-1 flex-col [&>svg]:min-h-0 [&>svg]:flex-1">
-        {data.hasData ? (
-          <ChartView result={result} color={widget.color} />
-        ) : (
-          <p className="flex flex-1 items-center justify-center py-4 text-center text-xs text-muted-foreground">
-            {t("dashboard.noData")}
-          </p>
-        )}
-      </div>
+      {/* Indicator widgets render a KPI tile instead of a chart. */}
+      {widget.type === "indicator" ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1">
+          {(() => {
+            const agg = widget.indicatorAggregation ?? "count";
+            const value = computeIndicator(data.rows, widget.field, agg);
+            if (value === null) {
+              return (
+                <p className="text-center text-xs text-muted-foreground">{t("dashboard.noData")}</p>
+              );
+            }
+            const formatted = formatIndicatorValue(value);
+            const colorStyle = widget.color ? { color: widget.color } : undefined;
+            return (
+              <>
+                <span className="text-3xl font-bold leading-none tracking-tight" style={colorStyle}>
+                  {widget.prefix ?? ""}
+                  {formatted}
+                  {widget.suffix ?? ""}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {t(`dashboard.indicatorAggregation.${agg}`)}
+                  {widget.field ? ` · ${widget.field}` : ""}
+                </span>
+              </>
+            );
+          })()}
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col [&>svg]:min-h-0 [&>svg]:flex-1">
+          {data.hasData && result ? (
+            <ChartView result={result} color={widget.color} />
+          ) : (
+            <p className="flex flex-1 items-center justify-center py-4 text-center text-xs text-muted-foreground">
+              {t("dashboard.noData")}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

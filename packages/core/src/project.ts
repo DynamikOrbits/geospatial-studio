@@ -15,6 +15,7 @@ import {
   type DashboardWidgetType,
   type GeoLibreLayer,
   type GeoLibreProject,
+  type IndicatorAggregation,
   type LayerGroup,
   type LayerStyle,
   type LegendConfig,
@@ -741,11 +742,20 @@ const DASHBOARD_WIDGET_TYPES: readonly DashboardWidgetType[] = [
   "line",
   "box",
   "pie",
+  "indicator",
 ];
 const DASHBOARD_WIDGET_AGGREGATIONS: readonly DashboardWidgetAggregation[] = [
   "count",
   "sum",
   "mean",
+];
+const INDICATOR_AGGREGATIONS: readonly IndicatorAggregation[] = [
+  "count",
+  "sum",
+  "mean",
+  "min",
+  "max",
+  "median",
 ];
 
 /**
@@ -802,6 +812,22 @@ export function normalizeWidgets(value: unknown): DashboardWidget[] | null {
     }
     const valueField = normalizeString(candidate.valueField).trim();
     if (valueField) widget.valueField = valueField;
+    // Indicator widget fields (issue #1381). Only an indicator reads them, so
+    // drop them elsewhere rather than round-tripping dead configuration.
+    if (type === "indicator") {
+      if (
+        candidate.indicatorAggregation &&
+        INDICATOR_AGGREGATIONS.includes(candidate.indicatorAggregation)
+      ) {
+        widget.indicatorAggregation = candidate.indicatorAggregation;
+      }
+      // Prefix/suffix are not trimmed: a leading/trailing space is intentional
+      // (e.g. " ha" or "$ ").
+      const prefix = normalizeString(candidate.prefix);
+      if (prefix) widget.prefix = prefix;
+      const suffix = normalizeString(candidate.suffix);
+      if (suffix) widget.suffix = suffix;
+    }
     widgets.push(widget);
   }
   return widgets.length > 0 ? widgets : null;
