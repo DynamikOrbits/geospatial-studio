@@ -449,6 +449,7 @@ export {
 export {
   maplibreTimeSliderPlugin,
   TIME_SLIDER_PLUGIN_ID,
+  TIME_SLIDER_SOURCE_KIND,
   getActiveTimeSliderControl,
   getLayerTimeBinding,
   isTimeSliderIdle,
@@ -490,8 +491,9 @@ export {
 export {
   bandOptionsFromResults,
   downsampleSteps,
-  getTimeSliderCogSources,
+  getTimeSliderPixelSources,
   hasTimeSliderRasterStack,
+  ordinalSteps,
   queryPixelTimeSeries,
   seriesToFeatureCollection,
   valueAtBand,
@@ -502,6 +504,13 @@ export {
   type PixelTimeSeriesOptions,
   type PixelTimeSeriesResult,
 } from "./plugins/time-slider-pixel-series";
+export {
+  getTimeSliderSymbology,
+  parseBandList,
+  setTimeSliderSymbology,
+  type TimeSliderSymbology,
+  type TimeSliderSymbologyPatch,
+} from "./plugins/time-slider-symbology";
 export {
   getPixelIdentifiableSource,
   identifyTimeSliderPixel,

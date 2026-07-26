@@ -1,10 +1,12 @@
 import { DEFAULT_LAYER_STYLE, useAppStore, type GeoLibreLayer } from "@geolibre/core";
 import {
+  resolveUrl,
   TimeSliderControl,
   type SourceSpec,
   type TimeSliderConfig,
   type TimeSliderOptions,
 } from "maplibre-gl-time-slider";
+import { loadMosaic } from "maplibre-gl-raster";
 import type { GeoLibreAppAPI, GeoLibreMapControlPosition, GeoLibrePlugin } from "../types";
 import {
   buildTimeFilter,
@@ -12,13 +14,19 @@ import {
   type TimeBinding,
   type TimeGranularity,
 } from "./time-slider-binding";
+import { usesMosaicManifest } from "./time-slider-source-url";
 
 /**
  * Marker placed on every GeoLibre store layer that mirrors a time-slider
  * source, used to reconcile and prune the plugin's layers without touching any
  * others (mirrors the Esri Wayback `sourceKind` convention).
+ *
+ * Exported as {@link TIME_SLIDER_SOURCE_KIND} so the Style panel can recognize
+ * these layers and offer the symbology their dock source supports.
  */
 const STORE_LAYER_SOURCE_KIND = "time-slider";
+
+export { STORE_LAYER_SOURCE_KIND as TIME_SLIDER_SOURCE_KIND };
 
 /**
  * Default configuration applied on first activation. No data sources are seeded:
@@ -367,15 +375,65 @@ function attachStoreSync(control: TimeSliderControl): void {
   // this control is attached.
   startThemeSync(control);
   const detachBindingSync = attachBindingSync(control);
+  const detachDisplaySync = attachDisplaySync(control);
   // Bind the detacher to this specific control and its own handler closures so
   // a second attach can never orphan the previous control's listeners.
   detachStoreSync = () => {
     control.off("sourceadd", onSourceAdd);
     control.off("sourceremove", onSourceRemove);
     detachBindingSync();
+    detachDisplaySync();
     stopThemeSync();
     detachStoreSync = null;
   };
+}
+
+// ----- Opacity and visibility ------------------------------------------------
+// The Layers panel and Style panel drive a mirrored layer the way they drive any
+// other: they write `opacity`/`visible` to the store, and MapController pushes
+// those onto the layer's `nativeLayerIds`. That only reaches a source the
+// library renders as a real MapLibre layer — an XYZ/WMS source, or a COG on the
+// `titiler` engine. A mosaic (and therefore a COG on the `gpu`/`wasm` engine,
+// which the library renders through the same adapter) draws on a deck.gl overlay
+// or through the WASM tiler's own source, so those writes land on a layer id
+// that does not exist and the controls appear dead. Forwarding the store's
+// values to the control instead reaches every source type, because each adapter
+// implements `setOpacity`/`setVisible` against whatever it actually rendered.
+
+/** Last opacity/visibility forwarded per source id, so an unrelated store write
+ * (a rename, another layer's edit) does not re-push identical values. */
+const lastDisplay = new Map<string, { opacity: number; visible: boolean }>();
+
+/**
+ * Forwards the store's opacity and visibility for mirrored dock layers to the
+ * control, which routes them to the adapter that owns the rendering.
+ *
+ * @param control - The active control.
+ * @returns A detacher that stops the subscription.
+ */
+function attachDisplaySync(control: TimeSliderControl): () => void {
+  const apply = (): void => {
+    const ids = new Set<string>();
+    for (const layer of useAppStore.getState().layers) {
+      if (layer.metadata.sourceKind !== STORE_LAYER_SOURCE_KIND) continue;
+      ids.add(layer.id);
+      const opacity = typeof layer.opacity === "number" ? layer.opacity : 1;
+      const visible = layer.visible !== false;
+      const previous = lastDisplay.get(layer.id);
+      if (previous && previous.opacity === opacity && previous.visible === visible) continue;
+      lastDisplay.set(layer.id, { opacity, visible });
+      // Skip the first pass for a layer whose values already match the spec it
+      // was mirrored from, so restoring a project does not re-push what the
+      // control just rendered.
+      if (!previous) continue;
+      control.setSourceProperty(layer.id, { opacity, visible } as Partial<SourceSpec>);
+    }
+    for (const id of [...lastDisplay.keys()]) {
+      if (!ids.has(id)) lastDisplay.delete(id);
+    }
+  };
+  apply();
+  return useAppStore.subscribe(apply);
 }
 
 // ----- Bound GeoLibre layers ------------------------------------------------
@@ -722,6 +780,7 @@ function syncStoreLayers(control: TimeSliderControl | null): void {
   for (const spec of control.getSources()) {
     if (!spec.id) continue;
     activeIds.add(spec.id);
+    ensureSourceBounds(control, spec);
     addOrUpdateStoreLayer(createStoreLayer(spec));
   }
 
@@ -733,7 +792,90 @@ function syncStoreLayers(control: TimeSliderControl | null): void {
     .map((layer) => layer.id);
   for (const id of staleIds) {
     store.removeLayer(id);
+    forgetSourceBounds(id);
   }
+}
+
+// ----- Source extents --------------------------------------------------------
+// The Layers panel's "Zoom to layer" fits `metadata.bounds`, and a dock source
+// carries no extent of its own: the mirrored layer is external-native, so there
+// is no MapLibre source with `bounds` to fall back on either, and the button did
+// nothing. The dock resolves an extent for a COG when the layer is added
+// (`spec.bounds`, from TiTiler); a mosaic's extent is only in its manifest, so
+// it is fetched once per source, off the sync path.
+
+/** Resolved WGS84 `[west, south, east, north]` extents, keyed by source id. */
+const sourceBounds = new Map<string, [number, number, number, number]>();
+/** Source ids whose lookup already ran, success or failure, so a source without
+ * a recoverable extent is not re-fetched on every sync. */
+const boundsAttempted = new Set<string>();
+/** Bumped per source id whenever its cached extent is dropped. A manifest fetch
+ * captures the generation it started under, so a lookup still in flight when the
+ * source is removed cannot write its extent onto a *different* source that later
+ * reuses the same id. */
+const boundsGeneration = new Map<string, number>();
+
+/** Narrows a value to a finite `[west, south, east, north]` extent. */
+function normalizeBounds(value: unknown): [number, number, number, number] | null {
+  return Array.isArray(value) && value.length === 4 && value.every((n) => Number.isFinite(n))
+    ? (value as [number, number, number, number])
+    : null;
+}
+
+/**
+ * Makes a source's extent available to {@link createStoreLayer}, fetching it
+ * when only the mosaic manifest knows it.
+ *
+ * Runs at most once per source id. The manifest fetch is deliberately not
+ * awaited — sync is called from event handlers that must stay synchronous — so
+ * it re-syncs on its own once the extent lands.
+ *
+ * @param control - The control the source belongs to.
+ * @param spec - The dock source to resolve an extent for.
+ */
+function ensureSourceBounds(control: TimeSliderControl, spec: SourceSpec): void {
+  const id = spec.id;
+  if (!id || boundsAttempted.has(id)) return;
+  boundsAttempted.add(id);
+
+  const declared = normalizeBounds((spec as { bounds?: unknown }).bounds);
+  if (declared) {
+    sourceBounds.set(id, declared);
+    return;
+  }
+  if (spec.type !== "mosaic") return;
+
+  const generation = boundsGeneration.get(id) ?? 0;
+  void (async () => {
+    try {
+      const url = await resolveUrl(spec.url, control.getCurrentDate());
+      // Guard the fetch: an engine-rewritten COG also reports `type: "mosaic"`,
+      // and parsing it as a manifest would download the whole GeoTIFF.
+      if (!usesMosaicManifest(spec, url)) return;
+      const { bounds } = await loadMosaic(url);
+      const extent = normalizeBounds([bounds.west, bounds.south, bounds.east, bounds.north]);
+      // The control may have been rebuilt or torn down while the manifest was
+      // in flight; re-syncing a dead control would resurrect its store layers.
+      // The source may also have been removed and a different one added under
+      // the same id, in which case this extent belongs to neither.
+      if (!extent || timeSliderControl !== control) return;
+      if ((boundsGeneration.get(id) ?? 0) !== generation) return;
+      sourceBounds.set(id, extent);
+      syncStoreLayers(control);
+    } catch {
+      // No extent for this source: "Zoom to layer" stays inert, exactly as
+      // before. A missing or unreachable manifest for the current date is the
+      // expected failure here and is not worth surfacing.
+    }
+  })();
+}
+
+/** Drops a removed source's cached extent so a later source reusing the id
+ * resolves its own, and invalidates any lookup still in flight for it. */
+function forgetSourceBounds(id: string): void {
+  sourceBounds.delete(id);
+  boundsAttempted.delete(id);
+  boundsGeneration.set(id, (boundsGeneration.get(id) ?? 0) + 1);
 }
 
 function addOrUpdateStoreLayer(layer: GeoLibreLayer): void {
@@ -782,6 +924,22 @@ export function createStoreLayer(spec: SourceSpec): GeoLibreLayer {
   // pre-rendered picture tiles with nothing to recover, and a GeoJSON source is
   // mirrored as a vector layer that identifies through the normal map query.
   const pixelIdentify = spec.type === "cog" || spec.type === "mosaic";
+  // Whether the client-side raster pipeline (deck.gl, or the WASM tiler's own
+  // source) draws this layer rather than MapLibre. `mosaic` is exactly that set:
+  // a real mosaic, plus a COG on the `gpu`/`wasm` engine, which the library
+  // reports as a mosaic because it renders it through the same adapter.
+  //
+  // Carried on the layer rather than read back from the control so the Style
+  // panel can react to it: a saved project restores its mirrored layers before
+  // the plugin creates its control, and asking the control during that window
+  // answers "no" and offers MapLibre paint sliders that cannot work.
+  const clientRenderedRaster = spec.type === "mosaic";
+  // The source's own extent, when one has been resolved (see
+  // `ensureSourceBounds`). Read from the cache rather than taken as an argument
+  // so every sync rebuilds the same layer, keeping `shouldUpdateStoreLayer`
+  // stable instead of flip-flopping the metadata.
+  const bounds =
+    normalizeBounds((spec as { bounds?: unknown }).bounds) ?? sourceBounds.get(sourceId);
   return {
     id: sourceId,
     name: spec.name ?? sourceId,
@@ -794,6 +952,10 @@ export function createStoreLayer(spec: SourceSpec): GeoLibreLayer {
       externalNativeLayer: true,
       identifiable: pixelIdentify,
       ...(pixelIdentify ? { pixelIdentify: true } : {}),
+      ...(clientRenderedRaster ? { clientRenderedRaster: true } : {}),
+      // Feeds the Layers panel's "Zoom to layer", which has nothing else to fit
+      // for an external-native layer.
+      ...(bounds ? { bounds } : {}),
       nativeLayerIds: [sourceId],
       sourceId,
       sourceIds: [sourceId],
@@ -809,5 +971,6 @@ function removeAllTimeSliderStoreLayers(): void {
     .map((layer) => layer.id);
   for (const id of ids) {
     store.removeLayer(id);
+    forgetSourceBounds(id);
   }
 }

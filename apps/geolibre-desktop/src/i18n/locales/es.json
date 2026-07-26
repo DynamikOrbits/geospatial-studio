@@ -1359,10 +1359,7 @@
       "exit": "Salir"
     },
     "pixelTimeSeriesMode": {
-      "start": "Serie temporal de píxeles",
-      "title": "Modo de serie temporal de píxeles activo",
-      "hint": "Haga clic en los píxeles de la pila ráster para añadirlos al gráfico. Esc para detener.",
-      "exit": "Detener"
+      "start": "Serie temporal de píxeles"
     }
   },
   "terrainSettings": {
@@ -1390,6 +1387,11 @@
     "noValues": "No hay valores para la banda seleccionada en estas ubicaciones (fuera del ráster o todos los pasos de tiempo son nodata).",
     "truncated": "Mostrando {{kept}} de {{total}} pasos de la línea de tiempo (submuestreado para limitar las lecturas).",
     "chartAria": "Gráfico de líneas del valor de píxel a lo largo del tiempo",
+    "yAxis": "Eje Y",
+    "yMin": "Mín",
+    "yMax": "Máx",
+    "axisAuto": "auto",
+    "gapNote": "Los segmentos discontinuos abarcan fechas sin lectura (nodata o fuera de la cobertura).",
     "exportCsv": "Exportar CSV",
     "exportGeoParquet": "Exportar GeoParquet"
   },
@@ -4091,6 +4093,13 @@
       "m5": "5 minutos",
       "m15": "15 minutos"
     }
+  },
+  "timeSliderSymbology": {
+    "bands": "Bandas",
+    "bandsPlaceholder": "auto",
+    "bandsHint": "Números de banda desde 1, separados por comas (p. ej. 4,3,2). Déjalo vacío para el valor predeterminado.",
+    "bandsInvalid": "Introduce números de banda enteros de 1 o más, separados por comas.",
+    "colormapNone": "Ninguno (RGB / multibanda)"
   },
   "rasterSymbology": {
     "gamma": "Gamma",
