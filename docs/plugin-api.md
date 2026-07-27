@@ -223,6 +223,106 @@ manager.register(myPlugin);
 manager.activate("my-plugin", appApi);
 ```
 
+## Add a built-in plugin (in this repository)
+
+Built-in plugins ship with GeoLibre itself. Most plugins do **not** need to be
+built in — see [External plugins](#external-plugins) to ship one without forking
+GeoLibre. To add one to this repository:
+
+1. Create a plugin file in `packages/plugins/src/plugins/`.
+
+   ```typescript
+   import type { GeoLibreAppAPI, GeoLibrePlugin } from "../types";
+
+   export const myPlugin: GeoLibrePlugin = {
+     id: "my-plugin",
+     name: "My Plugin",
+     version: "0.1.0",
+     activate: (app: GeoLibreAppAPI) => {
+       app.setBasemap("https://example.com/style.json");
+     },
+     deactivate: () => {
+       /* basemap remains until the user changes it */
+     },
+   };
+   ```
+
+   Basemap plugins deliberately leave the style they applied in place on
+   deactivate — the built-in `osm-basemap` and `carto-light` plugins do the
+   same, since reverting the map under the user would be more surprising than
+   keeping what they last selected. Plugins that add controls, listeners, or
+   layers must undo them in `deactivate()`.
+
+2. Export it from `packages/plugins/src/index.ts`.
+
+   ```typescript
+   export { myPlugin } from "./plugins/my-plugin";
+   ```
+
+3. Register it in `apps/geolibre-desktop/src/hooks/usePlugins.ts`.
+
+   ```typescript
+   import { myPlugin } from "@geolibre/plugins";
+
+   manager.registerAll([
+     maplibreLayerControlPlugin,
+     maplibreGeoAgentPlugin,
+     maplibreGeoEditorPlugin,
+     myPlugin,
+   ]);
+   ```
+
+For a MapLibre control plugin, add the package dependency, then call
+`app.addMapControl(control, "top-left")` in `activate()` and
+`app.removeMapControl(control)` in `deactivate()`. If the control's npm package
+ships its own stylesheet, import that stylesheet in
+`apps/geolibre-desktop/src/main.tsx`, alongside the existing
+`maplibre-gl-*/style.css` imports. That is only for a dependency's own CSS —
+any app-specific fixes on top of it belong in `index.css`, as described under
+[Styling third-party controls](#styling-third-party-controls) below.
+
+Built-in MapLibre controls such as Navigation, Fullscreen, Geolocate, Globe,
+Terrain, Scale, Attribution, and Logo are toggled from the desktop app's
+Controls menu, which also opens Search, a standalone place search panel backed
+by the Components plugin. Keep project-specific controls such as Layer Control
+and Components in the Plugins menu when they use the plugin API or need plugin
+lifecycle behavior.
+
+The Components plugin wraps `maplibre-gl-components` controls and wires their
+layer events into the GeoLibre store. It provides Add Data shortcuts for
+FlatGeobuf, PMTiles, Zarr, LiDAR, and Gaussian splats, while raster COG and
+GeoTIFF layers can also be added through the standard Add Raster Layer dialog.
+
+### Styling third-party controls
+
+If a third-party MapLibre control needs app-specific styling fixes, add scoped
+overrides in `apps/geolibre-desktop/src/index.css` instead of editing files in
+`node_modules`. Keep selectors limited to the plugin's control class. For
+example, GeoEditor toolbar buttons need a local override because MapLibre's
+default control button CSS can override their flex centering:
+
+```css
+.geo-editor-control .geo-editor-tool-button {
+  align-items: center;
+  display: flex !important;
+  justify-content: center;
+  line-height: 0;
+  padding: 0;
+}
+
+.geo-editor-control .geo-editor-tool-button svg {
+  display: block;
+  flex: 0 0 auto;
+  margin: 0;
+}
+```
+
+Run `npm run build` and `pre-commit run --all-files` before submitting the
+change. If you also touched pages under `docs/`, build the site — CI runs
+`zensical build --strict`, so a broken link or a page missing from the
+`mkdocs.yml` `nav` fails the build. See
+[Contributing](contributing.md#documentation) for both gates in full.
+
 ## Built-in plugins
 
 | ID                            | Description                                                                                                         |
