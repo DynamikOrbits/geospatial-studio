@@ -1,8 +1,11 @@
 import {
   DEFAULT_LAYER_STYLE,
   type GeoLibreLayer,
+  type ExternalNativePaintBridge,
   geojsonHasZCoordinates,
+  getExternalNativePaintBridge,
   type LayerStyle,
+  pluginOwnsPaint,
   proportionalRadiusExpression,
   ruleBasedVisibilityFilter,
   shouldUseTiledRendering,
@@ -418,6 +421,13 @@ function syncExternalNativeLayer(
     ensurePMTilesExternalLayer(map, layer, nativeLayerIds, beforeId);
   }
 
+  // A plugin-painted layer (a MapLibre CustomLayerInterface) has no paint
+  // properties to set, so the panel's opacity/visibility only reach it through
+  // the setters the registration supplied. Forward them before the branches
+  // below, which cover the native visibility/zoom/order work the custom layer
+  // still honors.
+  applyExternalNativePaintBridge(layer);
+
   // Custom render layers (e.g. 3D Tiles) manage their own visibility, opacity,
   // and zoom behavior through the control that registered them, so the standard
   // visibility/paint/zoom-range sync below must be skipped — only ordering is
@@ -685,7 +695,39 @@ function supportsNativeFillExtrusion(layer: GeoLibreLayer): boolean {
 // drops the layer onto an ordering-only path, these layers still respond to the
 // panel's show/hide and reorder controls.
 function controlOwnsPaint(layer: GeoLibreLayer): boolean {
-  return layer.metadata.controlOwnsPaint === true;
+  return layer.metadata.controlOwnsPaint === true || pluginOwnsPaint(layer);
+}
+
+// Last opacity/visibility handed to a layer's paint bridge, so a sync pass that
+// changed nothing (a reorder, a basemap swap) does not call the plugin's setters
+// again — each call typically triggers a WebGL repaint. Keyed by bridge identity
+// as well as layer id: a re-registration (project reload, unregister →
+// register) installs a new bridge whose renderer has never been told the current
+// values, so it must get a fresh apply even when the store values did not move.
+const appliedBridgeState = new Map<
+  string,
+  { bridge: ExternalNativePaintBridge; opacity: number; visible: boolean }
+>();
+
+// Forward the panel's generic controls to a plugin-painted layer's own API. The
+// setters are optional, so a plugin can bridge opacity only (the common case:
+// visibility already works, MapLibre honors it on a custom layer).
+function applyExternalNativePaintBridge(layer: GeoLibreLayer): void {
+  const bridge = getExternalNativePaintBridge(layer.id);
+  if (!bridge) {
+    appliedBridgeState.delete(layer.id);
+    return;
+  }
+
+  const applied = appliedBridgeState.get(layer.id);
+  const sameBridge = applied?.bridge === bridge;
+  if (!sameBridge || applied.opacity !== layer.opacity) {
+    bridge.setOpacity?.(layer.opacity);
+  }
+  if (!sameBridge || applied.visible !== layer.visible) {
+    bridge.setVisibility?.(layer.visible);
+  }
+  appliedBridgeState.set(layer.id, { bridge, opacity: layer.opacity, visible: layer.visible });
 }
 
 function ensurePMTilesExternalLayer(
