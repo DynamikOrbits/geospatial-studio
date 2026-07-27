@@ -134,6 +134,40 @@ docker run --rm -p 8080:80 \
   ghcr.io/opengeos/geolibre:latest
 ```
 
+To let authenticated users access the managed AI proxy without exposing its
+server token, route AI requests through the same nginx instance:
+
+```bash
+export GEOLIBRE_AI_PROXY_TOKEN="$(openssl rand -hex 32)"
+cd workers/ai-proxy
+printf '%s' "$GEOLIBRE_AI_PROXY_TOKEN" |
+  npx wrangler secret put GEOLIBRE_AI_PROXY_TOKEN
+cd ../..
+
+docker run --rm -p 8080:80 \
+  -e GEOLIBRE_AUTH_USER=admin \
+  -e GEOLIBRE_AUTH_PASSWORD='change-me' \
+  -e GEOLIBRE_AI_URL=/ai \
+  -e GEOLIBRE_AI_MODEL=openai/gpt-5.5 \
+  -e GEOLIBRE_AI_PROXY_URL=https://ai.geolibre.app \
+  -e GEOLIBRE_AI_PROXY_TOKEN="$GEOLIBRE_AI_PROXY_TOKEN" \
+  ghcr.io/opengeos/geolibre:latest
+```
+
+The proxy token must match the `GEOLIBRE_AI_PROXY_TOKEN` Worker secret. nginx
+injects it server-side and it never appears in frontend configuration. Direct
+inference calls to `ai.geolibre.app` without the token return `401`. If
+`GEOLIBRE_AI_URL` is unset, the image leaves the managed proxy disabled. Use
+HTTPS and prefer an `--env-file` or secrets manager.
+
+Enabling the proxy does not by itself restrict who may use it: whoever can
+reach `/ai` on the container spends against your Cloudflare account. Set
+`GEOLIBRE_AUTH_USER`/`GEOLIBRE_AUTH_PASSWORD` as above, or put your own
+authentication in front, before exposing an AI-enabled instance. If a TLS proxy
+fronts the container, list its address in `GEOLIBRE_TRUSTED_PROXIES` (a
+comma-separated list of IPs or CIDRs) so per-client rate limiting sees the real
+client rather than counting every user as the proxy.
+
 For deployments under a URL subpath, pass the app base at build time:
 
 ```bash

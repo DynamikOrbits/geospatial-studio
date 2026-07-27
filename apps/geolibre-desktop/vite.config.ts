@@ -43,6 +43,17 @@ function resolveViteMode(): string {
 // real shell env var (process.env alone would miss the file).
 const CONFIG_DIR = path.dirname(fileURLToPath(import.meta.url));
 const FILE_ENV = loadEnv(resolveViteMode(), CONFIG_DIR, "");
+
+// A managed build can use the server-side AI proxy without embedding any
+// provider credential. Only its public endpoint and selected model enter the
+// client bundle.
+for (const name of ["GEOLIBRE_AI_URL", "GEOLIBRE_AI_MODEL"] as const) {
+  const viteName = `VITE_${name}`;
+  if (!process.env[viteName]) {
+    const value = process.env[name] || FILE_ENV[viteName] || FILE_ENV[name];
+    if (value) process.env[viteName] = value;
+  }
+}
 if (!process.env.VITE_GOOGLE_MAPS_API_KEY) {
   const googleMapsApiKey =
     process.env.GOOGLE_MAPS_API_KEY ||
