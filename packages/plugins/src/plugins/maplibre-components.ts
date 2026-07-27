@@ -73,6 +73,12 @@ import {
   loadKerchunkReference,
   type KerchunkRefs,
 } from "./kerchunk-reference-store";
+import {
+  nearestTimeIndex,
+  registerTemporalLayer,
+  unregisterTemporalLayer,
+} from "./temporal-layers";
+import { pickTimeDimension, resolveZarrTimeAxis } from "./zarr-time-axis";
 
 type ControlGridConstructor = (typeof import("maplibre-gl-components"))["ControlGrid"];
 type AddVectorControlConstructor = (typeof import("maplibre-gl-components"))["AddVectorControl"];
@@ -149,6 +155,20 @@ const PMTILES_SAMPLE_URL =
   "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-06-17.0/buildings.pmtiles";
 const ZARR_SAMPLE_URL =
   "https://carbonplan-maps.s3.us-west-2.amazonaws.com/v2/demo/4d/tavg-prec-month";
+/**
+ * A cube with a real time axis, so the Zarr panel can demonstrate the Time
+ * Slider binding. The CarbonPlan sample above cannot: its non-spatial dims are
+ * `band` and a bare 1-12 `month` climatology with no CF `units`, which is not a
+ * series of instants, so no temporal adapter is registered for it and the
+ * Layers panel correctly offers no bind action.
+ *
+ * NOAA OI SST V2 monthly means, 1981-2023 on a 1-degree global grid, chunked
+ * one time step per chunk (~165 KiB) so stepping the timeline is a single small
+ * read. Public domain (U.S. Government work); see the store's own attributes
+ * for the citation.
+ */
+const ZARR_TIME_SERIES_SAMPLE_URL =
+  "https://data.source.coop/giswqs/opengeos/noaa-oisst-v2-monthly.zarr";
 const LIDAR_SAMPLE_URL = "https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz";
 const SPLATTING_SAMPLE_URL = "https://maplibre.org/maplibre-gl-js/docs/assets/34M_17/34M_17.gltf";
 const RASTER_PROXY_PATH = "/__geolibre_raster_proxy";
@@ -588,6 +608,11 @@ function getStacColorRampModule(colormap: string): typeof STAC_COLOR_RAMP_MODULE
   };
 }
 
+// Matches the stop count of the control's own default colormap, so a named ramp
+// renders with the same smoothness as the built-in Zarr panel default. Declared
+// above ZARR_OPTIONS because that initializer resolves a ramp for its samples.
+const ZARR_COLORMAP_STOPS = 9;
+
 const ZARR_OPTIONS = {
   backgroundColor: "hsl(var(--popover))",
   className: "geolibre-zarr-control",
@@ -607,7 +632,23 @@ const ZARR_OPTIONS = {
   defaultOpacity: 0.85,
   defaultPickable: false,
   defaultSelector: { band: "prec", month: 1 },
-  sampleData: [{ label: "Climate (CarbonPlan)", url: ZARR_SAMPLE_URL }],
+  // The SST entry carries its own settings because the `default*` options below
+  // are the CarbonPlan sample's: a -2..35 degree field drawn against a 0-300
+  // ramp is a flat wash, and `{ band, month }` names dimensions it does not
+  // have. Needs maplibre-gl-components >= 0.28.0, which applies these on select.
+  sampleData: [
+    { label: "Climate (CarbonPlan)", url: ZARR_SAMPLE_URL },
+    {
+      label: "Sea surface temperature, monthly (NOAA)",
+      url: ZARR_TIME_SERIES_SAMPLE_URL,
+      variable: "sst",
+      clim: [-2, 32],
+      colormap: interpolateRampColors("turbo", ZARR_COLORMAP_STOPS),
+      // This store's only non-spatial dimension is `time`, which the Time
+      // Slider drives; an empty selector clears the climate sample's.
+      selector: {},
+    },
+  ],
   defaultVariable: "climate",
   fontColor: "hsl(var(--popover-foreground))",
 } satisfies ZarrLayerControlOptions;
@@ -2075,13 +2116,39 @@ export async function addCloudNetcdfLayer(
   // which adds the layer to the store. We intentionally do not read
   // getState().error here: the control is shared, so the error may be stale from
   // a prior operation, and addLayer resolves before async chunk loading finishes.
-  await zarrControl.addLayer(options.url, options.variable, {
-    store,
-    zarrVersion: 2,
-    selector: options.selector,
-    clim: options.clim,
-    colormap: options.colormap,
-    opacity: options.opacity,
+  // Queued with every other programmatic add, because the event carries no
+  // correlation id: overlapping adds would each latch onto the other's event.
+  const control = zarrControl;
+  await queueZarrAdd(async () => {
+    // The same event names the new layer, which the temporal registration below
+    // needs so this add's own references reach the time-axis lookup.
+    let addedLayerId: string | null = null;
+    const captureLayerId: ZarrLayerEventHandler = (event) => {
+      if (event.layerId) addedLayerId = event.layerId;
+    };
+    control.on("layeradd", captureLayerId);
+    // Claim this add, so the shared handler leaves the adapter to us.
+    const endAdd = beginProgrammaticZarrAdd(options.url);
+    try {
+      await control.addLayer(options.url, options.variable, {
+        store,
+        zarrVersion: 2,
+        selector: options.selector,
+        clim: options.clim,
+        colormap: options.colormap,
+        opacity: options.opacity,
+      });
+    } finally {
+      control.off("layeradd", captureLayerId);
+      endAdd();
+    }
+
+    // The references carry the coordinate attributes inline, which is the only
+    // way to read a NetCDF cube's CF units: its `url` names the kerchunk
+    // manifest, not a Zarr store whose metadata documents could be walked.
+    if (addedLayerId) {
+      registerZarrTemporalAdapter(addedLayerId, options.url, { refs, headers: options.headers });
+    }
   });
 
   // Unlike openZarrLayerPanel, the dialog-based flow intentionally leaves the
@@ -2165,20 +2232,34 @@ export async function addZarrRasterLayer(
     throw new Error("A Zarr variable is required (pass options.variable).");
   }
 
-  // The Zarr control is a shared singleton whose url/variable live in one state
-  // slot, and its "layeradd" event carries no correlation id, so two overlapping
-  // adds would each see the other's event and could return (and then patch) the
-  // wrong layer. Run them one at a time; a failed add must not break the chain.
-  const run = zarrAddQueue.then(() => addZarrLayerExclusively(app, options, url, variable));
-  zarrAddQueue = run.then(
+  return queueZarrAdd(() => addZarrLayerExclusively(app, options, url, variable));
+}
+
+// One add at a time: see the queue comment on queueZarrAdd.
+let zarrAddQueue: Promise<void> = Promise.resolve();
+
+/**
+ * Run a Zarr add exclusively.
+ *
+ * The Zarr control is a shared singleton whose url/variable live in one state
+ * slot, and its `layeradd` event carries no correlation id, so two overlapping
+ * adds would each see the other's event and could return (and then patch, or
+ * resolve the time axis of) the wrong layer. **Every** programmatic add goes
+ * through here — both `addZarrRasterLayer` and `addCloudNetcdfLayer`, which
+ * would otherwise overlap each other even for the same store. A failed add must
+ * not break the chain.
+ *
+ * @param run - The add to run once the queue drains.
+ * @returns Whatever the add resolves to.
+ */
+function queueZarrAdd<T>(run: () => Promise<T>): Promise<T> {
+  const result = zarrAddQueue.then(run);
+  zarrAddQueue = result.then(
     () => undefined,
     () => undefined,
   );
-  return run;
+  return result;
 }
-
-// One add at a time: see the queue comment in addZarrRasterLayer.
-let zarrAddQueue: Promise<void> = Promise.resolve();
 
 async function addZarrLayerExclusively(
   app: GeoLibreAppAPI,
@@ -2218,6 +2299,9 @@ async function addZarrLayerExclusively(
 
   control.on("layeradd", handleLayerAdd);
   control.on("error", handleError);
+  // Claim this add, so the shared `layeradd` handler leaves the adapter to the
+  // registration below, which knows both the layer id and these headers.
+  const endAdd = beginProgrammaticZarrAdd(url);
   try {
     // The control awaits its own load before resolving and reports failure by
     // emitting "error" rather than rejecting, so both outcomes are already
@@ -2239,11 +2323,18 @@ async function addZarrLayerExclusively(
   } finally {
     control.off("layeradd", handleLayerAdd);
     control.off("error", handleError);
+    endAdd();
   }
 
   if (!addedLayerId) {
     throw new Error(failure ?? "Failed to add the Zarr layer.");
   }
+
+  // A cube with a time axis becomes drivable by the Time Slider. Registered
+  // here rather than from the shared `layeradd` handler so this add's own
+  // headers reach the metadata lookup even when another add of the same store
+  // overlaps it (opengeos/GeoLibre#1448 review).
+  registerZarrTemporalAdapter(addedLayerId, url, { headers });
 
   // `createZarrLayerAddHandler` has already mirrored the layer into the store
   // (the control emits "layeradd" synchronously) along with the spatial
@@ -2295,6 +2386,146 @@ export async function setZarrLayerSelector(
   }
   return true;
 }
+// ----- Zarr time axis --------------------------------------------------------
+// A Zarr cube's time is an internal dimension, so the Time Slider drives it
+// through a temporal adapter (see `temporal-layers.ts`) rather than by filtering
+// features or swapping sources. Registration is best-effort and silent: a store
+// with no time axis simply never becomes bindable.
+
+/**
+ * What resolving a new layer's time axis needs but the `layeradd` event does not
+ * carry: an authenticated store's request headers, and (for Cloud-Optimized
+ * NetCDF) the kerchunk references whose inline `.zattrs` hold the coordinate
+ * attributes, since that layer's `url` points at the manifest rather than at a
+ * Zarr store.
+ */
+interface ZarrTemporalContext {
+  headers?: Record<string, string>;
+  refs?: KerchunkRefs;
+}
+
+/**
+ * Store URLs with a programmatic add in flight, refcounted.
+ *
+ * The `layeradd` event carries no correlation token, so a handler firing for one
+ * add cannot tell which caller's headers or references belong to it — and two
+ * adds of the *same* URL can overlap, because `addCloudNetcdfLayer` runs off
+ * `addZarrRasterLayer`'s queue. Rather than guess, the shared handler skips any
+ * layer whose URL has a programmatic add running: those callers know both the
+ * layer id and their own context, and register the adapter themselves once the
+ * add resolves. Only the Zarr panel's own adds (which have no context to get
+ * wrong) are registered by the handler.
+ */
+const programmaticZarrAdds = new Map<string, number>();
+
+/** Mark a programmatic add in flight, returning a disposer for its `finally`. */
+function beginProgrammaticZarrAdd(url: string): () => void {
+  programmaticZarrAdds.set(url, (programmaticZarrAdds.get(url) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const remaining = (programmaticZarrAdds.get(url) ?? 1) - 1;
+    if (remaining > 0) programmaticZarrAdds.set(url, remaining);
+    else programmaticZarrAdds.delete(url);
+  };
+}
+
+// How long to wait for `@carbonplan/zarr-layer` to finish loading its coordinate
+// arrays. `addLayer` resolves once the store's metadata is read, but the
+// dimension values land a moment later, so the read polls rather than assuming.
+const ZARR_DIMENSION_POLL_MS = 250;
+const ZARR_DIMENSION_ATTEMPTS = 24;
+
+/**
+ * The raw non-spatial coordinate values `@carbonplan/zarr-layer` loaded for a
+ * layer.
+ *
+ * `dimensionValues` is a real instance property but is **not** part of the
+ * package's public type surface (it is declared `private`), so this reads it
+ * through a structural cast. If the renderer ever renames it, Zarr layers
+ * quietly stop offering a Time Slider binding rather than failing the build;
+ * `tests/zarr-time-axis.test.ts` asserts the property still exists so the drift
+ * shows up in CI instead.
+ *
+ * @param layerId - A live Zarr layer id.
+ * @returns The coordinate values, or null when the layer went away or loaded none.
+ */
+async function readZarrDimensionValues(
+  layerId: string,
+): Promise<Record<string, (number | string)[]> | null> {
+  for (let attempt = 0; attempt < ZARR_DIMENSION_ATTEMPTS; attempt += 1) {
+    const instance = zarrControl?.getLayersMap().get(layerId) as
+      | { dimensionValues?: Record<string, (number | string)[]> }
+      | undefined;
+    if (!instance) return null;
+    const values = instance.dimensionValues;
+    if (values && Object.keys(values).length > 0) return values;
+    await new Promise((resolve) => setTimeout(resolve, ZARR_DIMENSION_POLL_MS));
+  }
+  return null;
+}
+
+/** Read a coordinate's `units`/`calendar` out of an inline kerchunk `.zattrs`. */
+function zarrTimeAttributesFromRefs(
+  refs: KerchunkRefs | undefined,
+  dimension: string,
+): { units?: string; calendar?: string } | null {
+  const entry = refs?.[`${dimension}/.zattrs`];
+  if (typeof entry !== "string") return null;
+  try {
+    const parsed = JSON.parse(entry) as Record<string, unknown>;
+    const units = typeof parsed.units === "string" ? parsed.units : undefined;
+    const calendar = typeof parsed.calendar === "string" ? parsed.calendar : undefined;
+    return units === undefined && calendar === undefined ? null : { units, calendar };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a freshly added Zarr layer's time axis and, when it has one, register
+ * the temporal adapter that lets the Time Slider step it via
+ * {@link setZarrLayerSelector}.
+ *
+ * The caller supplies its own {@link ZarrTemporalContext}: the `layeradd` event
+ * carries no correlation token, so context can only be attributed reliably by
+ * the code that started the add.
+ *
+ * @param layerId - The new layer's id.
+ * @param url - The store URL (or kerchunk manifest URL).
+ * @param context - The add's headers/references, when the caller has them.
+ */
+function registerZarrTemporalAdapter(
+  layerId: string,
+  url: string | undefined,
+  context: ZarrTemporalContext = {},
+): void {
+  const { headers, refs } = context;
+  void (async () => {
+    const dimensionValues = await readZarrDimensionValues(layerId);
+    if (!dimensionValues) return;
+    const attributes = refs
+      ? zarrTimeAttributesFromRefs(refs, pickTimeDimension(dimensionValues) ?? "time")
+      : undefined;
+    const axis = await resolveZarrTimeAxis(url ?? "", dimensionValues, {
+      ...(headers ? { headers } : {}),
+      ...(refs ? { attributes } : {}),
+    });
+    if (!axis) return;
+    // The layer may have been removed while the axis was being resolved.
+    if (!zarrControl?.getLayersMap().has(layerId)) return;
+    registerTemporalLayer(layerId, {
+      dimension: axis.dimension,
+      getTimeValues: () => axis.values,
+      setTime: async (date) => {
+        const index = nearestTimeIndex(axis.values, date.getTime());
+        if (index < 0) return;
+        await setZarrLayerSelector(layerId, { [axis.dimension]: index });
+      },
+    });
+  })();
+}
 
 // The control takes an explicit list of hex colors; the public option also
 // accepts a named GeoLibre ramp so a JS plugin need not spell out the stops.
@@ -2307,10 +2538,6 @@ function resolveZarrColormap(colormap: string | string[] | undefined): string[] 
   if (!name) return undefined;
   return interpolateRampColors(name, ZARR_COLORMAP_STOPS);
 }
-
-// Matches the stop count of the control's own default colormap, so a named ramp
-// renders with the same smoothness as the built-in Zarr panel default.
-const ZARR_COLORMAP_STOPS = 9;
 
 export function openLidarLayerPanel(app: GeoLibreAppAPI): void {
   void openStandaloneLidarControl(app);
@@ -3362,6 +3589,7 @@ function createZarrControl(ZarrLayerControlClass: ZarrLayerControlConstructor): 
         ? layer.id === event.layerId
         : !activeLayerIds.has(layer.id);
       if (shouldRemove) {
+        unregisterTemporalLayer(layer.id);
         store.removeLayer(layer.id);
       }
     }
@@ -3376,6 +3604,7 @@ function createZarrControl(ZarrLayerControlClass: ZarrLayerControlConstructor): 
     for (const layer of previous.layers) {
       if (!isZarrControlLayer(layer)) continue;
       if (currentById.has(layer.id)) continue;
+      unregisterTemporalLayer(layer.id);
       clearExternalNativePaintBridge(layer.id);
       zarrControl?.removeLayer(layer.id);
     }
@@ -4175,6 +4404,16 @@ function createZarrLayerAddHandler(): ZarrLayerEventHandler {
     // The renderer owns the pixels, so the panel's opacity/visibility reach it
     // through the control's setters rather than MapLibre paint properties.
     registerZarrPaintBridge(layer.id);
+    // A cube with a time axis becomes drivable by the Time Slider. Resolving the
+    // axis needs the renderer's async metadata load plus a store lookup, so it
+    // runs on its own and registers the adapter whenever it lands.
+    //
+    // Only for the Zarr panel's own adds: a programmatic add knows both its
+    // layer id and its own headers/references, which this event cannot be
+    // attributed to (see `programmaticZarrAdds`), so it registers its own.
+    if (!programmaticZarrAdds.has(layerInfo.url ?? "")) {
+      registerZarrTemporalAdapter(layer.id, layerInfo.url);
+    }
     if (store.layers.some((item) => item.id === layer.id)) {
       store.updateLayer(layer.id, {
         metadata: layer.metadata,
