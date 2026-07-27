@@ -4,9 +4,10 @@ import type {
   GeoLibreLayer,
   LayerStyle,
 } from "@geolibre/core";
-import type { FeatureCollection } from "geojson";
-import type { TemporalLayerAdapter } from "./plugins/temporal-layers";
+import type { FeatureCollection, Geometry } from "geojson";
 import type { IControl, Map as MapLibreMap } from "maplibre-gl";
+import type { OvertureTheme } from "maplibre-gl-overture-maps";
+import type { TemporalLayerAdapter } from "./plugins/temporal-layers";
 
 export type GeoLibreMapControlPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
@@ -115,6 +116,49 @@ export interface GeoLibreWmsLayerOptions extends GeoLibreTileLayerOptions {
    * sends `CRS` instead of `SRS`; some servers accept only one version.
    */
   version?: string;
+}
+
+/** Overture Maps themes available through the host's official PMTiles source. */
+export type GeoLibreOvertureTheme = OvertureTheme;
+
+/** Parameters for a bounded Overture Maps feature query. */
+export interface GeoLibreOvertureQuery {
+  /** Overture theme archive to query. */
+  theme: GeoLibreOvertureTheme;
+  /** MVT source layer inside the theme, e.g. `building` or `segment`. */
+  sourceLayer: string;
+  /** Query bounds as `[west, south, east, north]` in WGS84 degrees. */
+  bbox: [number, number, number, number];
+  /** Preferred MVT zoom. Defaults to 12 and decreases when the tile cap requires it. */
+  zoom?: number;
+  /** Maximum PMTiles tiles to inspect. Defaults to 512. */
+  maxTiles?: number;
+  /** Maximum matching features returned. Defaults to 50,000. */
+  maxFeatures?: number;
+  /** Optional polygon filter applied before features are returned. */
+  filterGeometry?: Geometry | FeatureCollection;
+  /**
+   * Spatial predicate for `filterGeometry`. Defaults to `intersects`.
+   * `centroid-within` uses the arithmetic mean of geometry vertices.
+   */
+  filterMode?: "centroid-within" | "intersects";
+  /** Optional request cancellation signal. */
+  signal?: AbortSignal;
+}
+
+/** Result of a bounded Overture Maps PMTiles feature query. */
+export interface GeoLibreOvertureQueryResult {
+  data: FeatureCollection;
+  release: string;
+  theme: GeoLibreOvertureTheme;
+  sourceLayer: string;
+  zoom: number;
+  /** Number of PMTiles tile lookups completed before the query stopped. */
+  tilesRead: number;
+  /** Number of matching features included in `data`. */
+  matchedFeatureCount: number;
+  /** Whether at least one additional match was excluded by `maxFeatures`. */
+  truncated: boolean;
 }
 
 /**
@@ -372,6 +416,17 @@ export interface GeoLibreAppAPI {
    * since any plugin can fetch any same-origin URL directly.
    */
   resolvePluginAssetUrl?: (pluginId: string, relativePath: string) => string | null;
+  /**
+   * Activate an installed plugin and optionally apply a partial project-state
+   * patch after activation. Returns false when the plugin is unavailable,
+   * refuses activation, or rejects the state.
+   */
+  activatePlugin?: (pluginId: string, state?: unknown) => Promise<boolean>;
+  /**
+   * Query a bounded set of features from GeoLibre's official Overture Maps
+   * PMTiles integration. The host enforces tile and feature limits.
+   */
+  queryOvertureFeatures?: (query: GeoLibreOvertureQuery) => Promise<GeoLibreOvertureQueryResult>;
   fitBounds?: (bounds: [number, number, number, number]) => void;
   getMap?: () => MapLibreMap | null;
   /**
