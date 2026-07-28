@@ -41,6 +41,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::Manager;
+use tauri_plugin_fs::FsExt;
 
 // OAuth popups are a desktop-only, multi-window concept; Android/iOS have no
 // equivalent, and `WebviewWindowBuilder::{on_new_window, window_features}` do
@@ -225,6 +226,7 @@ pub fn run() {
             load_external_plugin_bundles,
             read_admin_profile,
             read_env_vars,
+            allow_raster_asset,
             read_local_file,
             read_project_file,
             read_shapefile_siblings,
@@ -393,6 +395,27 @@ fn read_local_file(path: String) -> Result<tauri::ipc::Response, String> {
     fs::read(&path)
         .map(tauri::ipc::Response::new)
         .map_err(|error| format!("Could not read local file: {error}"))
+}
+
+/// Add one user-selected GeoTIFF to the asset-protocol scope. The filesystem
+/// and asset scopes are separate in Tauri; dialogs and native drops grant the
+/// former, but maplibre-gl-raster fetches through the latter for range reads.
+#[tauri::command]
+fn allow_raster_asset(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let lower = path.to_ascii_lowercase();
+    if !is_safe_absolute_path(&path) || !(lower.ends_with(".tif") || lower.ends_with(".tiff")) {
+        return Err(format!(
+            "Refusing to expose \"{path}\": not an absolute GeoTIFF path"
+        ));
+    }
+    if !app.fs_scope().is_allowed(&path) {
+        return Err(format!(
+            "Refusing to expose \"{path}\": the file was not selected or dropped by the user"
+        ));
+    }
+    app.asset_protocol_scope()
+        .allow_file(&path)
+        .map_err(|error| format!("Could not authorize local raster: {error}"))
 }
 
 /// Shapefile sidecar extensions read alongside a `.shp` (lowercased, no dot).

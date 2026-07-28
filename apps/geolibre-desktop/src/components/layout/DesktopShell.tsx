@@ -5,6 +5,7 @@ import { MapCanvas, setExternalDeckLayerOrderHandler } from "@geolibre/map";
 import { useTranslation } from "react-i18next";
 import {
   addRasterToMap,
+  prepareRasterControl,
   applyRasterLayerOrder,
   DECK_VIZ_PLUGIN_ID,
   DIRECTIONS_PLUGIN_ID,
@@ -27,6 +28,8 @@ import {
   restoreThreeDTilesLayers,
   restoreVectorLayers,
   setBookmarkLabels,
+  setLocalRasterFileReader,
+  setLocalRasterPicker,
   setNonTiledRasterHandler,
   setTerrainMeasureLabels,
   setViewStateLabels,
@@ -58,6 +61,8 @@ import {
   loadDroppedPhotoPaths,
   loadDroppedRasterFiles,
   loadDroppedRasterPaths,
+  pickLocalRasterFiles,
+  readRasterFileAtPath,
   isLoadedImageOverlay,
   isLoadedModel,
   loadDroppedVectorFiles,
@@ -933,6 +938,21 @@ export function DesktopShell({
     }
   }, []);
 
+  // Let the raster plugin reach the local filesystem on desktop: re-read a
+  // raster a saved project references by path, and open the native file dialog
+  // instead of the panel's own <input type="file"> (whose File carries no path,
+  // so the raster could never be restored). Both stay unregistered in the
+  // browser, where the plugin keeps its existing behavior. See issue #1463.
+  useEffect(() => {
+    if (!isTauri()) return;
+    setLocalRasterFileReader(readRasterFileAtPath);
+    setLocalRasterPicker(pickLocalRasterFiles);
+    return () => {
+      setLocalRasterFileReader(null);
+      setLocalRasterPicker(null);
+    };
+  }, []);
+
   // When a GeoTIFF fails to load because it is striped (not a tiled COG), offer
   // to convert it to a COG in the browser and load the result. Works for both a
   // local file and a remote URL (issue #916). The raster plugin detects the case
@@ -1246,7 +1266,12 @@ export function DesktopShell({
     if (!rasters.length) return 0;
     const appAPI = createAppAPI(mapControllerRef);
     for (const raster of rasters) {
-      await addRasterToMap(appAPI, raster.source, { name: raster.name });
+      // `path` is present only for a desktop pick/drop; it is what lets a saved
+      // project reload the raster instead of dropping it (issue #1463).
+      await addRasterToMap(appAPI, raster.source, {
+        name: raster.name,
+        ...(raster.path ? { localPath: raster.path } : {}),
+      });
     }
     return rasters.length;
   }, []);
@@ -1344,6 +1369,15 @@ export function DesktopShell({
         .onDragDropEvent(async (event) => {
           if (event.payload.type === "enter" || event.payload.type === "over") {
             setIsDraggingFiles(true);
+            // Match the perceived speed of Add Raster Layer: that flow warms
+            // the lazy raster control while its native picker is open. A map
+            // drop otherwise starts all initialization only after release.
+            // Fire-and-forget here so drag feedback never waits on imports.
+            if (event.payload.type === "enter") {
+              void prepareRasterControl(createAppAPI(mapControllerRef)).catch((error) => {
+                console.warn("[GeoLibre] Could not prepare the raster drop handler", error);
+              });
+            }
             return;
           }
 
