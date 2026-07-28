@@ -48,6 +48,7 @@ import {
   maplibreStreetViewPlugin,
   maplibreSunPlugin,
   maplibreRouteAnimationPlugin,
+  flightSimulatorPlugin,
   maplibreSwipePlugin,
   SWIPE_PLUGIN_ID,
   maplibreTimelapsePlugin,
@@ -184,6 +185,7 @@ manager.registerAll([
   maplibreEffectsPlugin,
   maplibreSunPlugin,
   maplibreRouteAnimationPlugin,
+  flightSimulatorPlugin,
   maplibreDirectionsPlugin,
   maplibreReverseGeocodePlugin,
   maplibreDeckGlVizPlugin,
@@ -951,6 +953,9 @@ export function createAppAPI(mapControllerRef?: RefObject<MapController | null>)
       control: Parameters<MapController["setBuiltInControlVisible"]>[0],
       visible: boolean,
     ) => mapControllerRef?.current?.setBuiltInControlVisible(control, visible) ?? false,
+    setTerrainEnabled: (enabled: boolean) =>
+      mapControllerRef?.current?.setTerrainEnabled(enabled) ?? false,
+    isTerrainEnabled: () => mapControllerRef?.current?.isTerrainEnabled() ?? false,
     getBuiltInMapControlPosition: (
       control: Parameters<MapController["getBuiltInControlPosition"]>[0],
     ) => mapControllerRef?.current?.getBuiltInControlPosition(control) ?? "top-right",
