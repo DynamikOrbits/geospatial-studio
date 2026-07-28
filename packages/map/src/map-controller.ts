@@ -40,6 +40,7 @@ import {
   vectorTileStyleLayerIds,
 } from "./layer-sync";
 import { installGlobePopupOcclusion } from "./globe-popup-occlusion";
+import { isMapboxStyleUrl, loadMapboxStyle, redactMapboxStyleUrl } from "./mapbox-style";
 import { PlanetaryScaleControl } from "./planetary-scale-control";
 import { getOfflineBasemapStyle, isOfflineBasemapSentinel } from "./protomaps-basemap";
 import { ResetBearingControl } from "./reset-bearing-control";
@@ -380,6 +381,12 @@ export class MapController {
   // (reentrancy guard against a sync loop). See syncLayerControlState.
   private refreshingStyleEditor = false;
   private basemapStyleUrl = DEFAULT_BASEMAP;
+  // Bumped on every style application so an asynchronously resolved style (the
+  // Mapbox path in applyStyleToMap) can tell whether it is still the current one.
+  private styleGeneration = 0;
+  // Aborts the in-flight Mapbox descriptor request, so a superseded basemap
+  // change (or destroy) does not leave the fetch running.
+  private pendingMapboxStyleAbort: AbortController | null = null;
   private basemapVisible = true;
   private basemapOpacity = 1;
   private mapPreferences: MapPreferences = DEFAULT_PROJECT_PREFERENCES.map;
@@ -422,9 +429,14 @@ export class MapController {
     const maxPitch = clampNumber(mapPreferences.maxPitch, 0, DEFAULT_MAX_PITCH);
     this.mapPreferences = mapPreferences;
     this.basemapStyleUrl = options.styleUrl ?? DEFAULT_BASEMAP;
+    // A Mapbox descriptor has to be fetched and rewritten before MapLibre will
+    // take it (see applyStyleToMap), which the Map constructor cannot wait for.
+    // Start blank and apply it below, as soon as the listeners are wired — the
+    // path a project saved with a Mapbox basemap and a split-view pane both take.
+    const deferMapboxStyle = isMapboxStyleUrl(this.basemapStyleUrl);
     this.map = new maplibregl.Map({
       container,
-      style: resolveMapStyle(this.basemapStyleUrl),
+      style: deferMapboxStyle ? createBlankMapStyle() : resolveMapStyle(this.basemapStyleUrl),
       center: view?.center ?? [-100, 40],
       zoom: view?.zoom ?? 2,
       bearing: view?.bearing ?? 0,
@@ -496,6 +508,10 @@ export class MapController {
     this.addAttributionControl();
     this.addLogoControl();
     this.addMaptoolkitLogoControl();
+    // Kick off the deferred Mapbox descriptor fetch now that `style.load` and
+    // `styledata` are wired, so the real style is treated exactly like a later
+    // basemap switch rather than racing the listeners above.
+    if (deferMapboxStyle) this.applyStyleToMap(this.basemapStyleUrl);
     return this.map;
   }
 
@@ -863,6 +879,7 @@ export class MapController {
       clearTimeout(this.layerControlStyleRefreshTimer);
       this.layerControlStyleRefreshTimer = null;
     }
+    this.abortPendingMapboxStyle();
     this.map?.remove();
     this.map = null;
     this.styleReady = false;
@@ -872,14 +889,97 @@ export class MapController {
   setStyle(url: string): void {
     if (!this.map) return;
     this.basemapStyleUrl = url;
-    this.styleReady = false;
-    this.basemapOriginalPaintValues.clear();
-    this.removeLayerControl();
-    this.map.setStyle(resolveMapStyle(url));
+    this.applyStyleToMap(url);
     // Switching to/from a planetary basemap changes the active body (the store's
     // ellipsoid subscription runs first, so the singleton is already current),
     // so redraw the scale bar for the new radius without waiting for a pan.
     this.scaleControl?.refresh();
+  }
+
+  /**
+   * Tears down the state that belongs to the outgoing style, immediately before
+   * the incoming one is handed to MapLibre. `style.load` rebuilds all of it.
+   *
+   * Deliberately called per style application rather than at the top of
+   * `setStyle`: the Mapbox path below only reaches `map.setStyle` after an
+   * asynchronous fetch, and tearing down first would leave the controller
+   * wedged if that fetch failed — `styleReady` stuck false with no `style.load`
+   * coming to clear it, so layer syncing, basemap visibility/opacity and the
+   * layer control would all stay disabled over a still-rendered old style.
+   */
+  private beginStyleSwap(): void {
+    this.styleReady = false;
+    this.basemapOriginalPaintValues.clear();
+    this.removeLayerControl();
+  }
+
+  /**
+   * Hands a basemap style URL to MapLibre.
+   *
+   * Everything except Mapbox resolves synchronously, so `setStyle` is handed the
+   * URL (or the inline style a GeoLibre sentinel expands to) directly. Mapbox
+   * style descriptors are Mapbox-flavored and must be fetched and rewritten
+   * before MapLibre will accept them (see ./mapbox-style), which makes that path
+   * asynchronous: a generation counter drops the result of a swap the user has
+   * already superseded, so a slow descriptor can never overwrite a newer
+   * basemap. Validation is off for those, matching how the basemap control
+   * applies them — the descriptor is transformed to spec, not authored here.
+   */
+  private applyStyleToMap(url: string): void {
+    const map = this.map;
+    if (!map) return;
+    const generation = ++this.styleGeneration;
+    // Drop any descriptor still in flight for the basemap this one replaces:
+    // its result is already destined for the generation check below, so the
+    // request is pure waste. Also covers a request that never settles, which
+    // would otherwise keep its closure (and this controller) alive.
+    this.abortPendingMapboxStyle();
+
+    if (!isMapboxStyleUrl(url)) {
+      this.beginStyleSwap();
+      map.setStyle(resolveMapStyle(url));
+      return;
+    }
+
+    const pending = new AbortController();
+    this.pendingMapboxStyleAbort = pending;
+    void loadMapboxStyle(url, pending.signal)
+      .then((style) => {
+        if (this.map !== map || this.styleGeneration !== generation) return;
+        this.beginStyleSwap();
+        map.setStyle(style, { validate: false });
+      })
+      .catch((error: unknown) => {
+        if (this.map !== map || this.styleGeneration !== generation) return;
+        // Nothing was torn down (beginStyleSwap runs only on success), so the
+        // controller stays fully live over the style it already had — better
+        // than blanking the map. The basemap control watches its own parallel
+        // setStyle and rolls the basemap back through the store when a provider
+        // style fails, which arrives here as a newer generation.
+        // The URL carries the user's access_token, so log the descriptor id only.
+        console.warn(
+          `Failed to load the Mapbox basemap style "${redactMapboxStyleUrl(url)}".`,
+          error,
+        );
+      })
+      .finally(() => {
+        if (this.pendingMapboxStyleAbort === pending) {
+          this.pendingMapboxStyleAbort = null;
+        }
+      });
+  }
+
+  /**
+   * Cancels an in-flight Mapbox descriptor request, if any.
+   *
+   * An abort rejects the fetch with an `AbortError`, but that rejection always
+   * lands on a superseded generation (this is only called after bumping it, or
+   * from `destroy`, which nulls the map), so the handlers above return before
+   * reaching the warning — no aborted request is ever reported as a failure.
+   */
+  private abortPendingMapboxStyle(): void {
+    this.pendingMapboxStyleAbort?.abort();
+    this.pendingMapboxStyleAbort = null;
   }
 
   setBasemapVisible(visible: boolean): void {
