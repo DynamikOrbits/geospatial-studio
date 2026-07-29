@@ -4,7 +4,7 @@ import {
   useAppStore,
 } from "@geolibre/core";
 import {
-  addCogRasterLayer,
+  addRasterToMap,
   addZarrRasterLayer,
   buildSelectorTimeBinding,
   registerTemporalLayer,
@@ -35,6 +35,7 @@ import {
   maplibreNasaEarthdataPlugin,
   maplibreNationalMapPlugin,
   maplibreOpenAerialMapPlugin,
+  maplibreStacCatalogsPlugin,
   maplibreSourceCoopPlugin,
   maplibreNaturalEarthPlugin,
   maplibreHuggingFacePlugin,
@@ -168,6 +169,7 @@ manager.registerAll([
   maplibreNationalMapPlugin,
   maplibreEarthdataGisPlugin,
   maplibreOpenAerialMapPlugin,
+  maplibreStacCatalogsPlugin,
   maplibreSourceCoopPlugin,
   maplibreNaturalEarthPlugin,
   maplibreHuggingFacePlugin,
@@ -799,7 +801,7 @@ export function useTimeSliderAutoClose(mapControllerRef: RefObject<MapController
 export function createAppAPI(mapControllerRef?: RefObject<MapController | null>) {
   const store = useAppStore.getState();
   // Captured so methods that delegate to plugin helpers taking the AppAPI
-  // itself (e.g. addCogLayer -> addCogRasterLayer) can pass `api`. Only read
+  // itself (e.g. addCogLayer -> addRasterToMap) can pass `api`. Only read
   // when those methods are called, which is always after assignment.
   const api = {
     setBasemap: (url: string) => store.setBasemapStyleUrl(url),
@@ -884,30 +886,36 @@ export function createAppAPI(mapControllerRef?: RefObject<MapController | null>)
         beforeLayerId ?? null,
       );
     },
-    // Unlike the tile helpers above, a COG is read client-side by the maplibre
-    // raster control (band/rescale/colormap/nodata), so it delegates to the
-    // components plugin's addCogRasterLayer rather than building a store layer
-    // here. It takes the AppAPI itself (to mount the control on demand), so we
-    // hand it the captured `api`.
-    addCogLayer: (name: string, url: string, options?: GeoLibreCogLayerOptions) =>
-      addCogRasterLayer(api, {
-        url,
+    // Unlike the tile helpers above, a COG is read client-side by the shared
+    // raster control. Besides keeping every COG path on one renderer, this is
+    // what mirrors the layer as `maplibre-gl-raster`, making the full Raster
+    // symbology section available in the Style panel.
+    addCogLayer: (name: string, url: string, options?: GeoLibreCogLayerOptions) => {
+      const bands = options?.bands
+        ?.split(",")
+        .map((value) => Number(value.trim()))
+        .filter((value) => Number.isInteger(value) && value > 0);
+      const range =
+        options?.rescaleMin !== undefined && options.rescaleMax !== undefined
+          ? ([options.rescaleMin, options.rescaleMax] as [number, number])
+          : undefined;
+      return addRasterToMap(api, url, {
         name,
-        ...(options?.bands !== undefined ? { bands: options.bands } : {}),
-        // The public option is a loose `string` (so JS plugins need not import
-        // the renderer's colormap union); the renderer validates the name and
-        // falls back to its default for anything it doesn't recognize.
-        ...(options?.colormap !== undefined
-          ? {
-              colormap: options.colormap as Parameters<typeof addCogRasterLayer>[1]["colormap"],
-            }
-          : {}),
-        ...(options?.rescaleMin !== undefined ? { rescaleMin: options.rescaleMin } : {}),
-        ...(options?.rescaleMax !== undefined ? { rescaleMax: options.rescaleMax } : {}),
-        ...(options?.nodata !== undefined ? { nodata: options.nodata } : {}),
-        ...(options?.opacity !== undefined ? { opacity: options.opacity } : {}),
-        beforeLayerId: options?.beforeLayerId ?? null,
-      }),
+        // STAC assets are already COGs with an HTTP(S) range-readable URL.
+        // Render them directly through the GPU COG engine; the WASM tiler is
+        // intended for local files and can leave remote programmatic layers
+        // registered without producing pixels.
+        defaults: { engine: "maplibre-gl-raster" },
+        state: {
+          ...(bands?.length ? { bands, mode: bands.length >= 3 ? "rgb" : "single" } : {}),
+          ...(options?.colormap !== undefined ? { colormap: options.colormap } : {}),
+          ...(range ? { rescale: [range] } : {}),
+          ...(options?.nodata !== undefined ? { nodata: options.nodata } : {}),
+          ...(options?.opacity !== undefined ? { opacity: options.opacity } : {}),
+        },
+        ...(options?.beforeLayerId ? { beforeId: options.beforeLayerId } : {}),
+      });
+    },
     // Zarr goes through the components plugin's shared @carbonplan/zarr-layer
     // control for the same reason as addCogLayer: the host owns the renderer, so
     // a plugin does not bundle (and fail to activate) a second copy.

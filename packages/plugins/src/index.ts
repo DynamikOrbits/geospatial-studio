@@ -393,6 +393,29 @@ export {
   type OpenAerialMapSearchOptions,
 } from "./plugins/openaerialmap-api";
 export {
+  maplibreStacCatalogsPlugin,
+  setStacLabels,
+  STAC_PLUGIN_ID,
+  type StacLabels,
+} from "./plugins/maplibre-stac";
+export {
+  connectStac,
+  isVisualizableAsset,
+  itemBbox,
+  loadStacIndex,
+  searchStacApi,
+  searchStaticStac,
+  STAC_INDEX_CATALOGS_URL,
+  type StacAsset,
+  type StacCollection,
+  type StacConnection,
+  type StacIndexCatalog,
+  type StacItem,
+  type StacNextPage,
+  type StacSearchOptions,
+  type StacSearchResult,
+} from "./plugins/stac-api";
+export {
   DEFAULT_SOURCE_COOP_LABELS,
   maplibreNaturalEarthPlugin,
   maplibreSourceCoopPlugin,
