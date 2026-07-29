@@ -39,6 +39,7 @@ import {
   syncLayer,
   vectorTileStyleLayerIds,
 } from "./layer-sync";
+import { globeSafeMaxZoom } from "./globe-fit-bounds";
 import { installGlobePopupOcclusion } from "./globe-popup-occlusion";
 import { isMapboxStyleUrl, loadMapboxStyle, redactMapboxStyleUrl } from "./mapbox-style";
 import { PlanetaryScaleControl } from "./planetary-scale-control";
@@ -51,6 +52,8 @@ const DEFAULT_PROJECTION: maplibregl.ProjectionSpecification = {
   type: "globe",
 };
 const DEFAULT_MAX_PITCH = 85;
+/** Edge margin, in CSS pixels, kept free when fitting the camera to an extent. */
+const FIT_BOUNDS_PADDING = 40;
 const BLANK_BACKGROUND_LAYER_ID = "geolibre-blank-background";
 const BLANK_BACKGROUND_COLOR = "#ffffff";
 const LAYER_CONTROL_EXCLUDED_LAYERS = [
@@ -1226,14 +1229,26 @@ export class MapController {
       [bounds[0], bounds[1]],
       [bounds[2], bounds[3]],
     ];
+    // `fitBounds` is built on `cameraForBounds`, so the camera the branches
+    // below read back carries the same globe over-zoom on a hemisphere-wide
+    // extent. Apply the ceiling to it too, or a world-scale layer is compared
+    // (and flown to) at a zoom the map would never actually settle on.
+    const fitCeiling = globeSafeMaxZoom(bounds, this.getViewportSize(), FIT_BOUNDS_PADDING);
+    const cappedZoom = (zoom: number): number =>
+      fitCeiling === null ? zoom : Math.min(zoom, fitCeiling);
+
     // Tile layers only carry data from their source `minzoom` up (e.g. an OGC
     // API vector tileset served only at z17). Fitting the whole extent would
     // land far below that zoom and render nothing, so when the fit is too far
     // out, fly to the extent center at the layer's minimum render zoom instead.
     const minRenderZoom = this.getLayerMinRenderZoom(layer);
     if (minRenderZoom !== null) {
-      const camera = this.map.cameraForBounds(box, { padding: 40 });
-      if (camera?.center && typeof camera.zoom === "number" && camera.zoom < minRenderZoom) {
+      const camera = this.map.cameraForBounds(box, { padding: FIT_BOUNDS_PADDING });
+      if (
+        camera?.center &&
+        typeof camera.zoom === "number" &&
+        cappedZoom(camera.zoom) < minRenderZoom
+      ) {
         this.map.flyTo({
           center: camera.center,
           zoom: minRenderZoom,
@@ -1248,18 +1263,18 @@ export class MapController {
     // reads as a 3D object on load, pulling back slightly so its vertical extent
     // fits. The user can flatten the pitch afterward.
     if (layer.metadata.customLayerType === "scenegraph") {
-      const camera = this.map.cameraForBounds(box, { padding: 40 });
+      const camera = this.map.cameraForBounds(box, { padding: FIT_BOUNDS_PADDING });
       if (camera?.center && typeof camera.zoom === "number") {
         this.map.flyTo({
           center: camera.center,
-          zoom: Math.max(camera.zoom - 0.75, 0),
+          zoom: Math.max(cappedZoom(camera.zoom) - 0.75, 0),
           pitch: 60,
           duration: 800,
         });
         return;
       }
     }
-    this.map.fitBounds(box, { padding: 40, duration: 800 });
+    this.fitBounds(bounds);
   }
 
   /** The layer's minimum render zoom (its tile source `minzoom`), if advertised
@@ -1271,6 +1286,18 @@ export class MapController {
       }
     }
     return null;
+  }
+
+  /**
+   * The map viewport in CSS pixels, or null when the canvas has not been laid
+   * out yet (a fresh or detached container reports zero) and any size-derived
+   * calculation would be nonsense.
+   */
+  private getViewportSize(): { width: number; height: number } | null {
+    const canvas = typeof this.map?.getCanvas === "function" ? this.map.getCanvas() : undefined;
+    const width = canvas?.clientWidth ?? 0;
+    const height = canvas?.clientHeight ?? 0;
+    return width > 0 && height > 0 ? { width, height } : null;
   }
 
   fitBounds(bounds: [number, number, number, number]): void {
@@ -1285,12 +1312,21 @@ export class MapController {
       });
       return;
     }
+    // An extent wider than the hemisphere a globe can show has no camera that
+    // contains it, and MapLibre's globe fit answers one of those by zooming *in*,
+    // leaving the data behind the horizon. Cap those at the flat-map zoom so they
+    // settle on a whole-globe view instead; narrower fits are untouched.
+    const maxZoom = globeSafeMaxZoom(bounds, this.getViewportSize(), FIT_BOUNDS_PADDING);
     this.map.fitBounds(
       [
         [bounds[0], bounds[1]],
         [bounds[2], bounds[3]],
       ],
-      { padding: 40, duration: 800 },
+      {
+        padding: FIT_BOUNDS_PADDING,
+        duration: 800,
+        ...(maxZoom === null ? {} : { maxZoom }),
+      },
     );
   }
 
