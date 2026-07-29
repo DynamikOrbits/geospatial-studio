@@ -99,6 +99,7 @@ import {
   getPropertyValues,
   isCategoricalProperty,
   isNumericProperty,
+  proportionalSizeBounds,
 } from "../../lib/vector-style-classification";
 import { buildStyleSuggestions, type StyleSuggestion } from "../../lib/style-suggestions";
 
@@ -1051,10 +1052,18 @@ export function StylePanel({
   // Layers whose style suggestions the user waved off this session (#1519).
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(() => new Set());
   const [extrusionError, setExtrusionError] = useState<string | null>(null);
+  const [proportionalSizeError, setProportionalSizeError] = useState<string | null>(null);
+  // Tracks auto-seeded proportional min/max so later tile samples can refine the
+  // range without overwriting a user's intentional 0–100 (or other) edit.
+  const seededProportionalBoundsRef = useRef<{
+    key: string;
+    min: number;
+    max: number;
+  } | null>(null);
   const [loadedVectorPropertyValues, setLoadedVectorPropertyValues] = useState<{
     layerId: string;
-    property: string;
-    values: unknown[];
+    /** Attribute samples keyed by property name (classification and/or size field). */
+    byProperty: Record<string, unknown[]>;
   } | null>(null);
   const [vectorPropertyValuesLoading, setVectorPropertyValuesLoading] = useState(false);
   const [vectorPropertyValuesUnavailable, setVectorPropertyValuesUnavailable] = useState(false);
@@ -1154,20 +1163,36 @@ export function StylePanel({
   ]);
 
   // Add Vector Layer keeps large tiled datasets in DuckDB instead of copying
-  // their geometry into the app store. Read only the selected attribute when
-  // classification needs its values, so categorized and graduated styling
-  // remain available without defeating tiled rendering.
+  // their geometry into the app store. Read only the selected attribute(s) when
+  // classification or proportional sizing needs values, so categorized /
+  // graduated styling and size-by-value remain available without defeating
+  // tiled rendering. Classification and size fields are sampled together when
+  // they differ so proportional min/max can still seed from field B while
+  // graduated colors load field A.
   useEffect(() => {
-    const usesDuckDbVector = layer?.metadata.sourceKind === "maplibre-gl-vector";
+    if (!layer) return;
+    const usesDuckDbVector = layer.metadata.sourceKind === "maplibre-gl-vector";
     const usesVectorTiles =
-      layer?.type === "vector-tiles" || layer?.type === "pmtiles" || layer?.type === "mbtiles";
-    const needsValues =
-      (usesDuckDbVector || usesVectorTiles) &&
-      !layer.geojson &&
+      layer.type === "vector-tiles" || layer.type === "pmtiles" || layer.type === "mbtiles";
+    if (!(usesDuckDbVector || usesVectorTiles) || layer.geojson) {
+      setLoadedVectorPropertyValues(null);
+      setVectorPropertyValuesLoading(false);
+      setVectorPropertyValuesUnavailable(false);
+      return;
+    }
+
+    const classificationNeedsValues =
       (draftVectorStyleMode === "graduated" || draftVectorStyleMode === "categorized") &&
       draftVectorStyleProperty !== "";
+    const proportionalPropertyToLoad = styleValue(layer.style, "proportionalSizeProperty");
+    const proportionalNeedsValues =
+      styleValue(layer.style, "proportionalSizeEnabled") && proportionalPropertyToLoad !== "";
+    const propertiesToLoad = [
+      ...(classificationNeedsValues ? [draftVectorStyleProperty] : []),
+      ...(proportionalNeedsValues ? [proportionalPropertyToLoad] : []),
+    ].filter((property, index, all) => property !== "" && all.indexOf(property) === index);
 
-    if (!needsValues) {
+    if (propertiesToLoad.length === 0) {
       setLoadedVectorPropertyValues(null);
       setVectorPropertyValuesLoading(false);
       setVectorPropertyValuesUnavailable(false);
@@ -1176,7 +1201,10 @@ export function StylePanel({
 
     let cancelled = false;
     setLoadedVectorPropertyValues((current) =>
-      current?.layerId === layer.id && current.property === draftVectorStyleProperty
+      current?.layerId === layer.id &&
+      propertiesToLoad.every((property) =>
+        Object.prototype.hasOwnProperty.call(current.byProperty, property),
+      )
         ? current
         : null,
     );
@@ -1197,13 +1225,13 @@ export function StylePanel({
       const sampleValues = (): boolean => {
         const features = loadedVectorTileFeatures(map, layer);
         if (features.length === 0) return false;
-        setLoadedVectorPropertyValues({
-          layerId: layer.id,
-          property: draftVectorStyleProperty,
-          values: features
-            .map((feature) => feature.properties?.[draftVectorStyleProperty])
-            .filter((value) => value !== null && value !== undefined),
-        });
+        const byProperty: Record<string, unknown[]> = {};
+        for (const property of propertiesToLoad) {
+          byProperty[property] = features
+            .map((feature) => feature.properties?.[property])
+            .filter((value) => value !== null && value !== undefined);
+        }
+        setLoadedVectorPropertyValues({ layerId: layer.id, byProperty });
         setVectorPropertyValuesLoading(false);
         return true;
       };
@@ -1232,19 +1260,24 @@ export function StylePanel({
       };
     }
 
-    void getVectorLayerPropertyValues(layer.id, draftVectorStyleProperty)
-      .then((values) => {
+    void Promise.all(
+      propertiesToLoad.map(async (property) => {
+        const values = await getVectorLayerPropertyValues(layer.id, property);
+        return [property, values] as const;
+      }),
+    )
+      .then((entries) => {
         if (cancelled) return;
-        if (values === null) {
-          setLoadedVectorPropertyValues(null);
-          setVectorPropertyValuesUnavailable(true);
-          return;
+        const byProperty: Record<string, unknown[]> = {};
+        for (const [property, values] of entries) {
+          if (values === null) {
+            setLoadedVectorPropertyValues(null);
+            setVectorPropertyValuesUnavailable(true);
+            return;
+          }
+          byProperty[property] = values;
         }
-        setLoadedVectorPropertyValues({
-          layerId: layer.id,
-          property: draftVectorStyleProperty,
-          values,
-        });
+        setLoadedVectorPropertyValues({ layerId: layer.id, byProperty });
       })
       .catch((error) => {
         if (!cancelled) {
@@ -1266,6 +1299,8 @@ export function StylePanel({
     layer?.geojson,
     layer?.id,
     layer?.metadata.sourceKind,
+    layer?.style.proportionalSizeEnabled,
+    layer?.style.proportionalSizeProperty,
     layer?.type,
   ]);
 
@@ -1274,11 +1309,12 @@ export function StylePanel({
       !layer ||
       !loadedVectorPropertyValues ||
       loadedVectorPropertyValues.layerId !== layer.id ||
-      loadedVectorPropertyValues.property !== draftVectorStyleProperty ||
       (draftVectorStyleMode !== "graduated" && draftVectorStyleMode !== "categorized")
     ) {
       return;
     }
+    const values = loadedVectorPropertyValues.byProperty[draftVectorStyleProperty];
+    if (!values) return;
 
     setDraftVectorStyleStops(
       createDefaultStops(
@@ -1288,7 +1324,7 @@ export function StylePanel({
         draftVectorStyleClassCount,
         draftVectorStyleColorRamp,
         draftVectorStyleClassificationScheme,
-        loadedVectorPropertyValues.values,
+        values,
       ),
     );
   }, [
@@ -1303,11 +1339,74 @@ export function StylePanel({
     loadedVectorPropertyValues,
   ]);
 
+  // When tiled attribute samples arrive for the proportional size field, seed
+  // (or refine) min/max. A ref records the last auto-applied range so a user's
+  // intentional 0–100 is never overwritten, while a partial first tile sample
+  // can still widen as more tiles load.
+  useEffect(() => {
+    if (!layer || !loadedVectorPropertyValues) return;
+    if (!styleValue(layer.style, "proportionalSizeEnabled")) return;
+    const property = styleValue(layer.style, "proportionalSizeProperty");
+    if (!property || loadedVectorPropertyValues.layerId !== layer.id) return;
+    const values = loadedVectorPropertyValues.byProperty[property];
+    // An empty tile sample is inconclusive — wait for features with values.
+    if (!values || values.length === 0) return;
+    const bounds = proportionalSizeBounds(layer, property, values);
+    if (!bounds) return;
+
+    const seedKey = `${layer.id}:${property}`;
+    const minValue = styleValue(layer.style, "proportionalSizeMinValue");
+    const maxValue = styleValue(layer.style, "proportionalSizeMaxValue");
+    const seeded = seededProportionalBoundsRef.current;
+
+    if (seeded?.key === seedKey) {
+      // Still wearing our auto-seed: refine when a richer sample expands/shifts it.
+      if (
+        minValue === seeded.min &&
+        maxValue === seeded.max &&
+        (bounds.min !== seeded.min || bounds.max !== seeded.max)
+      ) {
+        seededProportionalBoundsRef.current = {
+          key: seedKey,
+          min: bounds.min,
+          max: bounds.max,
+        };
+        setLayerStyle(layer.id, {
+          proportionalSizeMinValue: bounds.min,
+          proportionalSizeMaxValue: bounds.max,
+        });
+      }
+      return;
+    }
+
+    // New layer/property pair: only auto-seed from the unseeded defaults.
+    if (
+      minValue !== DEFAULT_LAYER_STYLE.proportionalSizeMinValue ||
+      maxValue !== DEFAULT_LAYER_STYLE.proportionalSizeMaxValue
+    ) {
+      // Non-default without our seed record → intentional; don't overwrite.
+      seededProportionalBoundsRef.current = { key: seedKey, min: minValue, max: maxValue };
+      return;
+    }
+
+    seededProportionalBoundsRef.current = {
+      key: seedKey,
+      min: bounds.min,
+      max: bounds.max,
+    };
+    setLayerStyle(layer.id, {
+      proportionalSizeMinValue: bounds.min,
+      proportionalSizeMaxValue: bounds.max,
+    });
+  }, [layer, loadedVectorPropertyValues, setLayerStyle]);
+
   // Reset the "show basemap layers" advanced toggle back to its clean default
   // whenever a different layer is selected. Keyed on the layer id alone so it
   // does not re-collapse while the user edits other style fields.
   useEffect(() => {
     setShowBasemapStyleLayers(false);
+    seededProportionalBoundsRef.current = null;
+    setProportionalSizeError(null);
   }, [layer?.id]);
 
   // Heatmap/cluster apply to point layers in two render paths: core GeoJSON
@@ -1626,11 +1725,11 @@ export function StylePanel({
     draftVectorStyleClassificationScheme !== styleValue(style, "vectorStyleClassificationScheme") ||
     draftVectorStyleExpression !== styleValue(style, "vectorStyleExpression") ||
     JSON.stringify(draftVectorStyleStops) !== JSON.stringify(currentVectorStops);
-  const draftVectorPropertyValues =
-    loadedVectorPropertyValues?.layerId === layer.id &&
-    loadedVectorPropertyValues.property === draftVectorStyleProperty
-      ? loadedVectorPropertyValues.values
+  const matchingPropertyValues = (property: string): unknown[] | undefined =>
+    loadedVectorPropertyValues?.layerId === layer.id
+      ? loadedVectorPropertyValues.byProperty[property]
       : undefined;
+  const draftVectorPropertyValues = matchingPropertyValues(draftVectorStyleProperty);
   const regenerateDraftVectorStyleStops = (
     mode: VectorStyleMode,
     property: string,
@@ -2716,6 +2815,37 @@ export function StylePanel({
       {vectorStyleError && <p className="text-xs text-destructive">{vectorStyleError}</p>}
     </div>
   );
+  /** True when a sample can prove the field lacks a usable numeric range (non-empty). */
+  const hasDecisivePropertySample = (property: string): boolean => {
+    if (layer.geojson?.features?.length) return true;
+    const sample = matchingPropertyValues(property);
+    // Empty tile samples are inconclusive — sparse/null viewport values must not
+    // disable a field that is numeric elsewhere in the dataset.
+    return Array.isArray(sample) && sample.length > 0;
+  };
+
+  const proportionalBoundsPatch = (property: string) => {
+    const bounds = proportionalSizeBounds(layer, property, matchingPropertyValues(property));
+    return bounds
+      ? { proportionalSizeMinValue: bounds.min, proportionalSizeMaxValue: bounds.max }
+      : null;
+  };
+
+  const rememberProportionalSeed = (property: string, min: number, max: number) => {
+    seededProportionalBoundsRef.current = { key: `${layer.id}:${property}`, min, max };
+  };
+
+  const clearProportionalSizeField = (disable: boolean, error: string | null = null) => {
+    seededProportionalBoundsRef.current = null;
+    setProportionalSizeError(error);
+    setLayerStyle(layer.id, {
+      ...(disable ? { proportionalSizeEnabled: false } : {}),
+      proportionalSizeProperty: "",
+      proportionalSizeMinValue: DEFAULT_LAYER_STYLE.proportionalSizeMinValue,
+      proportionalSizeMaxValue: DEFAULT_LAYER_STYLE.proportionalSizeMaxValue,
+    });
+  };
+
   const proportionalSizeControls = (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -2725,15 +2855,49 @@ export function StylePanel({
             id="proportionalSizeEnabled"
             type="checkbox"
             checked={proportionalEnabled}
-            onChange={(event) =>
-              setLayerStyle(layer.id, {
-                proportionalSizeEnabled: event.target.checked,
-              })
-            }
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              if (!enabled) {
+                setProportionalSizeError(null);
+                setLayerStyle(layer.id, { proportionalSizeEnabled: false });
+                return;
+              }
+              if (!proportionalProperty) {
+                setProportionalSizeError(null);
+                setLayerStyle(layer.id, { proportionalSizeEnabled: true });
+                return;
+              }
+              const boundsPatch = proportionalBoundsPatch(proportionalProperty);
+              if (boundsPatch) {
+                setProportionalSizeError(null);
+                rememberProportionalSeed(
+                  proportionalProperty,
+                  boundsPatch.proportionalSizeMinValue,
+                  boundsPatch.proportionalSizeMaxValue,
+                );
+                setLayerStyle(layer.id, {
+                  proportionalSizeEnabled: true,
+                  ...boundsPatch,
+                });
+                return;
+              }
+              // Non-empty sample proves the field is unusable — do not enable with a stale range.
+              if (hasDecisivePropertySample(proportionalProperty)) {
+                clearProportionalSizeField(true, t("style.symbology.errorProportionalSizeField"));
+                return;
+              }
+              // Tiled / unloaded / empty sample: enable and keep the field; the loader seeds bounds.
+              setProportionalSizeError(null);
+              setLayerStyle(layer.id, { proportionalSizeEnabled: true });
+            }}
           />
           {t("style.symbology.sizeByValue")}
         </label>
       </div>
+      {/* Outside the `proportionalEnabled` guard on purpose: rejecting a field
+          from the checkbox leaves proportional sizing off, so a message nested
+          inside that branch would unmount in the same render that set it. */}
+      {proportionalSizeError && <p className="text-xs text-destructive">{proportionalSizeError}</p>}
       {proportionalEnabled && (
         <>
           <div className="space-y-2">
@@ -2741,11 +2905,45 @@ export function StylePanel({
             <Select
               id="proportionalSizeProperty"
               value={proportionalProperty}
-              onChange={(event) =>
+              onChange={(event) => {
+                const property = event.target.value;
+                if (!property) {
+                  clearProportionalSizeField(false);
+                  return;
+                }
+                const boundsPatch = proportionalBoundsPatch(property);
+                if (boundsPatch) {
+                  setProportionalSizeError(null);
+                  rememberProportionalSeed(
+                    property,
+                    boundsPatch.proportionalSizeMinValue,
+                    boundsPatch.proportionalSizeMaxValue,
+                  );
+                  setLayerStyle(layer.id, {
+                    proportionalSizeProperty: property,
+                    ...boundsPatch,
+                  });
+                  return;
+                }
+                // Non-empty sample proves nonnumeric / constant — reject and clear stale range.
+                // Stay enabled: the user is mid-edit here, so keep the field select
+                // mounted next to the message instead of collapsing the section.
+                if (hasDecisivePropertySample(property)) {
+                  clearProportionalSizeField(
+                    false,
+                    t("style.symbology.errorProportionalSizeField"),
+                  );
+                  return;
+                }
+                // No decisive sample yet (tiled/empty): commit the field; defaults until load.
+                seededProportionalBoundsRef.current = null;
+                setProportionalSizeError(null);
                 setLayerStyle(layer.id, {
-                  proportionalSizeProperty: event.target.value,
-                })
-              }
+                  proportionalSizeProperty: property,
+                  proportionalSizeMinValue: DEFAULT_LAYER_STYLE.proportionalSizeMinValue,
+                  proportionalSizeMaxValue: DEFAULT_LAYER_STYLE.proportionalSizeMaxValue,
+                });
+              }}
               disabled={vectorStylePropertyOptions.length === 0}
             >
               {vectorStylePropertyOptions.length === 0 ? (
@@ -2761,6 +2959,16 @@ export function StylePanel({
                 </>
               )}
             </Select>
+            {vectorPropertyValuesLoading && (
+              <p className="text-xs text-muted-foreground">
+                {t("attributeTable.loadingAttributes")}
+              </p>
+            )}
+            {vectorPropertyValuesUnavailable && (
+              <p className="text-xs text-destructive">
+                {t("style.symbology.errorAttributesUnavailable")}
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <NumericStyleInput
