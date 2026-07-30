@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import {
   DEFAULT_BASEMAP,
   DEFAULT_LAYER_STYLE,
@@ -1350,5 +1351,58 @@ export function applyProjectToStore(project: GeoLibreProject): {
     primaryMapLabel: normalizeString(project.primaryMapLabel),
     projectStyleLibrary: normalizeStyleLibraryEntries(project.styleLibrary),
     metadata: project.metadata,
+  };
+}
+
+/**
+ * Create an unlinked copy of a project, suffixed with "(copy)" by default and
+ * stripped of share-specific metadata (shareId, shareUrl, etc.).
+ */
+export function detachProjectCopy(
+  project: GeoLibreProject,
+  options: { nameSuffix?: string } = {},
+): GeoLibreProject {
+  const suffix = options.nameSuffix ?? "(copy)";
+  const rawName = project.name.trim() || DEFAULT_PROJECT_NAME;
+  const name = suffix ? (rawName.endsWith(suffix) ? rawName : `${rawName} ${suffix}`) : rawName;
+
+  const metadata = { ...(project.metadata ?? {}) };
+  for (const key of Object.keys(metadata)) {
+    if (/^share/i.test(key)) {
+      delete metadata[key];
+    }
+  }
+
+  return {
+    ...project,
+    id: uuidv4(),
+    name,
+    metadata,
+  };
+}
+
+/**
+ * Create a template snapshot of a project. Optionally strips data layers while
+ * keeping basemap, layer groups, styles, legend config, preferences, widgets, and
+ * print layout.
+ */
+export function createProjectTemplate(
+  project: GeoLibreProject,
+  options: { name?: string; stripDataLayers?: boolean } = {},
+): GeoLibreProject {
+  const detached = detachProjectCopy(project, { nameSuffix: "" });
+  const name = options.name?.trim() || detached.name;
+  const stripDataLayers = options.stripDataLayers !== false;
+
+  const layers = stripDataLayers ? [] : detached.layers;
+
+  return {
+    ...detached,
+    name,
+    layers,
+    metadata: {
+      ...detached.metadata,
+      isTemplate: true,
+    },
   };
 }

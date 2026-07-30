@@ -56,6 +56,7 @@ import {
   type StoryChapter,
   type StoryMap,
   type StyleLibraryEntry,
+  type ProjectTemplateEntry,
 } from "./types";
 import { hasSimpleStyleProperties } from "./vector-color";
 import {
@@ -195,6 +196,10 @@ export interface AppState {
    * newProject/loadProject, and persisted by the desktop app (IndexedDB).
    */
   styleLibrary: StyleLibraryEntry[];
+  /**
+   * App-level Template Library. Persisted by the desktop app (IndexedDB).
+   */
+  templateLibrary: ProjectTemplateEntry[];
   /**
    * Project-scoped Style Manager entries (issue #1294), serialized into the
    * `.geolibre.json` `styleLibrary` array and replaced on project load.
@@ -425,6 +430,13 @@ export interface AppState {
    * removes the id from both lists.
    */
   deleteStyleLibraryEntry: (id: string, scope?: "app" | "project") => void;
+
+  /** Replace the app-level template library wholesale. */
+  setTemplateLibrary: (templates: ProjectTemplateEntry[]) => void;
+  /** Insert or replace a template in the Template Library. */
+  saveTemplateEntry: (entry: ProjectTemplateEntry) => void;
+  /** Remove a template entry by id from the Template Library. */
+  deleteTemplateEntry: (id: string) => void;
 
   /** Insert a new model or replace an existing one matching by `id`. */
   saveModel: (model: ProcessingModel) => void;
@@ -760,6 +772,7 @@ export const useAppStore = create<AppState>()(
       storymap: null,
       models: [],
       styleLibrary: [],
+      templateLibrary: [],
       projectStyleLibrary: [],
       processingHistory: [],
       widgets: [],
@@ -1135,6 +1148,18 @@ export const useAppStore = create<AppState>()(
             isDirty: s.isDirty || inProject,
           };
         }),
+
+      setTemplateLibrary: (templates) => set({ templateLibrary: templates }),
+      saveTemplateEntry: (entry) =>
+        set((s) => ({
+          templateLibrary: s.templateLibrary.some((t) => t.id === entry.id)
+            ? s.templateLibrary.map((t) => (t.id === entry.id ? entry : t))
+            : [...s.templateLibrary, entry],
+        })),
+      deleteTemplateEntry: (id) =>
+        set((s) => ({
+          templateLibrary: s.templateLibrary.filter((t) => t.id !== id),
+        })),
 
       saveModel: (model) =>
         set((s) => {

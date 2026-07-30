@@ -264,6 +264,18 @@ export const MENU_ITEM_CATALOG: readonly MenuItemCatalogEntry[] = [
     tier: "basic",
   },
   {
+    id: "project.duplicate",
+    menuId: "project",
+    labelKey: "toolbar.item.duplicate",
+    tier: "basic",
+  },
+  {
+    id: "project.saveAsTemplate",
+    menuId: "project",
+    labelKey: "toolbar.item.saveAsTemplateEllipsis",
+    tier: "intermediate",
+  },
+  {
     id: "project.share",
     menuId: "project",
     labelKey: "toolbar.item.shareEllipsis",

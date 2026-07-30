@@ -1431,6 +1431,8 @@ export function TopToolbar({
           }}
           onSave={() => void projectFiles.handleSave()}
           onSaveAs={() => void projectFiles.handleSaveAs()}
+          onDuplicate={() => projectFiles.handleDuplicate()}
+          onSaveAsTemplate={() => projectFiles.handleSaveAsTemplate()}
           onShare={() => setShareDialogOpen(true)}
           onExportHtml={() => void projectFiles.handleExportHtml()}
           onCollaborate={() => setCollaborateDialogOpen(true)}
