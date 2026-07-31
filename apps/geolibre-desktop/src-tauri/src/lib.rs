@@ -3572,15 +3572,52 @@ fn create_oauth_popup_window(
 }
 
 #[cfg(target_os = "linux")]
+fn nvidia_is_primary_gpu(drm_root: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(drm_root) else {
+        return false;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("card") || name.contains('-') {
+            return false;
+        }
+        let device = entry.path().join("device");
+        fs::read_to_string(device.join("vendor"))
+            .is_ok_and(|vendor| vendor.trim().eq_ignore_ascii_case("0x10de"))
+            && fs::read_to_string(device.join("boot_vga"))
+                .is_ok_and(|boot_vga| boot_vga.trim() == "1")
+            && fs::read_link(device.join("driver")).is_ok_and(|driver| {
+                driver
+                    .file_name()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("nvidia"))
+            })
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_uses_nvidia_renderer(
+    drm_root: &Path,
+    prime_offload: Option<&std::ffi::OsStr>,
+    glx_vendor: Option<&std::ffi::OsStr>,
+) -> bool {
+    prime_offload.is_some_and(|value| value != "0")
+        || glx_vendor.is_some_and(|value| value.eq_ignore_ascii_case("nvidia"))
+        || nvidia_is_primary_gpu(drm_root)
+}
+
+#[cfg(target_os = "linux")]
 fn configure_linux_webkit() {
     // WebKitGTK's DMABUF renderer could fail to allocate GBM buffers on older
     // graphics stacks, leaving the Tauri window blank, so it used to be
     // disabled here unconditionally. Disabling it also forces a slow readback
     // compositing path that visibly drops MapLibre pan/zoom FPS, and the
-    // allocation bugs are fixed in current WebKitGTK, so keep the workaround
-    // only for versions older than 2.48. An explicit user/distributor value
-    // always wins (per WebKit semantics, "0" keeps DMABUF on and any other
-    // value disables it). Only set the default when unset.
+    // allocation bugs are fixed on most current graphics stacks, so keep the
+    // workaround only for versions older than 2.48 and Nvidia renderers, where
+    // GBM allocation failures still occur on current WebKitGTK. An explicit
+    // user/distributor value always wins (per WebKit semantics, "0" keeps
+    // DMABUF on and any other value disables it). Only set the default when
+    // unset.
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
         let webkit_version = unsafe {
             (
@@ -3588,7 +3625,15 @@ fn configure_linux_webkit() {
                 webkit2gtk_sys::webkit_get_minor_version(),
             )
         };
-        if webkit_version < (2, 48) {
+        let prime_offload = std::env::var_os("__NV_PRIME_RENDER_OFFLOAD");
+        let glx_vendor = std::env::var_os("__GLX_VENDOR_LIBRARY_NAME");
+        if webkit_version < (2, 48)
+            || linux_uses_nvidia_renderer(
+                Path::new("/sys/class/drm"),
+                prime_offload.as_deref(),
+                glx_vendor.as_deref(),
+            )
+        {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
     }
@@ -3609,6 +3654,8 @@ mod tests {
         is_allowed_local_vector_path, is_allowed_project_path, is_disallowed_ip,
         is_safe_absolute_path,
     };
+    #[cfg(target_os = "linux")]
+    use super::{linux_uses_nvidia_renderer, nvidia_is_primary_gpu};
     // Everything these imports feed is compiled out of the `mas` build, so the
     // tests that exercise it (and their scaffolding) are gated with it.
     #[cfg(not(feature = "mas"))]
@@ -3681,6 +3728,67 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[cfg(all(target_os = "linux", not(feature = "mas")))]
+    #[test]
+    fn detects_primary_nvidia_gpu() {
+        let root = ScratchDir::new("nvidia-primary");
+        let device = root.path().join("card0/device");
+        std::fs::create_dir_all(&device).unwrap();
+        std::fs::write(device.join("vendor"), "0x10de\n").unwrap();
+        std::fs::write(device.join("boot_vga"), "1\n").unwrap();
+        std::os::unix::fs::symlink("/sys/bus/pci/drivers/nvidia", device.join("driver")).unwrap();
+
+        assert!(nvidia_is_primary_gpu(root.path()));
+    }
+
+    #[cfg(all(target_os = "linux", not(feature = "mas")))]
+    #[test]
+    fn ignores_secondary_nvidia_gpu() {
+        let root = ScratchDir::new("nvidia-secondary");
+        let device = root.path().join("card1/device");
+        std::fs::create_dir_all(&device).unwrap();
+        std::fs::write(device.join("vendor"), "0x10de\n").unwrap();
+        std::fs::write(device.join("boot_vga"), "0\n").unwrap();
+        std::os::unix::fs::symlink("/sys/bus/pci/drivers/nvidia", device.join("driver")).unwrap();
+
+        assert!(!nvidia_is_primary_gpu(root.path()));
+    }
+
+    #[cfg(all(target_os = "linux", not(feature = "mas")))]
+    #[test]
+    fn ignores_primary_nvidia_gpu_using_nouveau() {
+        let root = ScratchDir::new("nouveau-primary");
+        let device = root.path().join("card0/device");
+        std::fs::create_dir_all(&device).unwrap();
+        std::fs::write(device.join("vendor"), "0x10de\n").unwrap();
+        std::fs::write(device.join("boot_vga"), "1\n").unwrap();
+        std::os::unix::fs::symlink("/sys/bus/pci/drivers/nouveau", device.join("driver")).unwrap();
+
+        assert!(!nvidia_is_primary_gpu(root.path()));
+    }
+
+    #[cfg(all(target_os = "linux", not(feature = "mas")))]
+    #[test]
+    fn detects_explicit_nvidia_renderer_environment() {
+        let root = ScratchDir::new("nvidia-renderer-env");
+
+        assert!(linux_uses_nvidia_renderer(
+            root.path(),
+            Some(OsStr::new("1")),
+            None,
+        ));
+        assert!(linux_uses_nvidia_renderer(
+            root.path(),
+            None,
+            Some(OsStr::new("NVIDIA")),
+        ));
+        assert!(!linux_uses_nvidia_renderer(
+            root.path(),
+            Some(OsStr::new("0")),
+            Some(OsStr::new("mesa")),
+        ));
     }
 
     // Regression for issue #1223: installed builds place the bundled sidecar at
