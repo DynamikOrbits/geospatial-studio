@@ -2249,7 +2249,7 @@ export function LayerPanel({
         data-group-header=""
         data-testid="layer-group-header"
         data-group-name={group.name}
-        className={`rounded-md border p-2 transition-colors ${
+        className={`w-full min-w-0 max-w-full rounded-md border p-2 transition-colors ${
           isDropTarget
             ? "border-primary bg-primary/10"
             : "border-border bg-muted/30 hover:border-muted-foreground/40"
@@ -2257,7 +2257,7 @@ export function LayerPanel({
         onDragOver={(e) => handleGroupHeaderDragOver(e, group.id)}
         onDrop={(e) => handleGroupHeaderDrop(e, group.id)}
       >
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 items-center gap-1">
           <button
             type="button"
             className="rounded p-0.5 text-muted-foreground hover:bg-muted"
@@ -2320,7 +2320,7 @@ export function LayerPanel({
             />
           ) : (
             <span
-              className="flex-1 truncate text-sm font-semibold"
+              className="min-w-0 flex-1 truncate text-sm font-semibold"
               title={t("layers.doubleClickToRename")}
               onDoubleClick={(e: ReactMouseEvent) => {
                 e.stopPropagation();
@@ -2544,8 +2544,13 @@ export function LayerPanel({
           </Button>
         </div>
       </div>
-      <ScrollArea className="flex-1">
-        <div className="space-y-1 p-2">
+      <ScrollArea
+        className="flex-1 [&_[data-radix-scroll-area-viewport]>div]:block! [&_[data-radix-scroll-area-viewport]>div]:w-full! [&_[data-radix-scroll-area-viewport]>div]:min-w-0!"
+        // Radix measures scroll content with an injected display:table
+        // wrapper. Opt this viewport into block sizing so long layer names
+        // cannot establish a wider min-content table.
+      >
+        <div className="w-full min-w-0 space-y-1 p-2">
           {layers.length === 0 && (
             <p className="px-2 py-4 text-xs text-muted-foreground">
               {isBeginnerProfile ? t("layers.emptyBeginner") : t("layers.empty")}
@@ -2696,11 +2701,15 @@ export function LayerPanel({
                     data-layer-card=""
                     data-testid="layer-row"
                     data-layer-name={layer.name}
-                    className={`relative rounded-md border p-2 transition-colors ${
+                    className={`relative min-w-0 max-w-full rounded-md border p-2 transition-colors ${
                       selectedLayerId === layer.id
                         ? "border-primary bg-primary/5"
                         : "border-border bg-background hover:border-muted-foreground/40 hover:bg-muted/20"
-                    } ${draggedLayerId === layer.id ? "opacity-50" : ""} ${group ? "ms-4" : ""}`}
+                    } ${draggedLayerId === layer.id ? "opacity-50" : ""} ${
+                      // width:auto lets the browser subtract the group margin;
+                      // combining ms-4 with w-full would overflow the panel.
+                      group ? "ms-4" : "w-full"
+                    }`}
                     onDragOver={(e) => handleLayerDragOver(e, layer.id)}
                     onDrop={(e) => handleLayerDrop(e, layer.id, displayIndex)}
                     onDragEnd={resetDragState}
@@ -2719,7 +2728,7 @@ export function LayerPanel({
                       draggedDisplayIndex < displayIndex && (
                         <div className="pointer-events-none absolute -bottom-1 left-2 right-2 h-1 rounded-full bg-primary shadow-[0_0_0_2px_hsl(var(--background))]" />
                       )}
-                    <div className="flex items-center gap-1">
+                    <div className="flex min-w-0 items-center gap-1">
                       <span
                         role="button"
                         tabIndex={0}
@@ -2775,7 +2784,7 @@ export function LayerPanel({
                         />
                       ) : (
                         <span
-                          className={`flex-1 truncate text-sm font-medium ${
+                          className={`min-w-0 flex-1 truncate text-sm font-medium ${
                             groupHidden ? "text-muted-foreground" : ""
                           }`}
                           title={
@@ -2791,7 +2800,7 @@ export function LayerPanel({
                           {layer.name}
                         </span>
                       )}
-                      <span className="text-[10px] uppercase text-muted-foreground">
+                      <span className="shrink-0 text-[10px] uppercase text-muted-foreground">
                         {layerTypeLabel(layer, t)}
                       </span>
                     </div>
