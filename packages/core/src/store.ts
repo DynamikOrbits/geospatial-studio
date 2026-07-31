@@ -39,6 +39,7 @@ import {
   type GeoLibreLayer,
   type GeoLibreProject,
   type LayerGroup,
+  type LayerLibraryEntry,
   type AttributeFormConfig,
   type LayerJoin,
   type LayerVirtualField,
@@ -65,6 +66,7 @@ import {
   extractCopiedLayerStyle,
 } from "./layer-style-clipboard";
 import { applyJoinsToLayer, cascadeLayerJoinRefresh, reapplyLayerJoins } from "./joins";
+import { MAX_LAYER_LIBRARY_ENTRIES } from "./layer-library";
 import {
   DEFAULT_ELLIPSOID_ID,
   getPlanetaryBasemapByStyleUrl,
@@ -198,6 +200,13 @@ export interface AppState {
    * newProject/loadProject, and persisted by the desktop app (IndexedDB).
    */
   styleLibrary: StyleLibraryEntry[];
+  /**
+   * App-level Layer Library (issue #1520) — the Browser panel's My Data
+   * section. Like {@link styleLibrary} it lives outside the project lifecycle:
+   * never serialized into the project file, untouched by newProject/loadProject,
+   * and persisted by the desktop app (IndexedDB). Most recently saved first.
+   */
+  layerLibrary: LayerLibraryEntry[];
   /**
    * App-level Template Library. Persisted by the desktop app (IndexedDB).
    */
@@ -432,6 +441,21 @@ export interface AppState {
    * removes the id from both lists.
    */
   deleteStyleLibraryEntry: (id: string, scope?: "app" | "project") => void;
+
+  /**
+   * Replace the app-level Layer Library wholesale. Used by the persistence
+   * layer on startup and by bundle imports.
+   */
+  setLayerLibrary: (entries: LayerLibraryEntry[]) => void;
+  /**
+   * Insert or replace (matching by `id`) a Layer Library entry. New entries go
+   * to the front so the most recently saved layer leads the My Data section.
+   */
+  saveLayerLibraryEntry: (entry: LayerLibraryEntry) => void;
+  /** Rename a Layer Library entry; a blank name is ignored. */
+  renameLayerLibraryEntry: (id: string, name: string) => void;
+  /** Remove a Layer Library entry by id. */
+  deleteLayerLibraryEntry: (id: string) => void;
 
   /** Replace the app-level template library wholesale. */
   setTemplateLibrary: (templates: ProjectTemplateEntry[]) => void;
@@ -774,6 +798,7 @@ export const useAppStore = create<AppState>()(
       storymap: null,
       models: [],
       styleLibrary: [],
+      layerLibrary: [],
       templateLibrary: [],
       projectStyleLibrary: [],
       processingHistory: [],
@@ -1150,6 +1175,40 @@ export const useAppStore = create<AppState>()(
             isDirty: s.isDirty || inProject,
           };
         }),
+
+      // The entry cap is applied on every write, not just when reading
+      // untrusted input, so ordinary use (repeated saves, importing several
+      // bundles over time) cannot grow the library past it. Mirrors
+      // `writeBrowserFavorites`, which slices to MAX_FAVORITES on each write.
+      setLayerLibrary: (entries) =>
+        set({ layerLibrary: entries.slice(0, MAX_LAYER_LIBRARY_ENTRIES) }),
+      saveLayerLibraryEntry: (entry) =>
+        set((s) => ({
+          // App-level saves don't touch the project file, so no dirty flag
+          // (mirrors saveStyleLibraryEntry's "app" scope). A new entry goes to
+          // the front, so at the cap the oldest falls off the end.
+          layerLibrary: s.layerLibrary.some((e) => e.id === entry.id)
+            ? s.layerLibrary.map((e) => (e.id === entry.id ? entry : e))
+            : [entry, ...s.layerLibrary].slice(0, MAX_LAYER_LIBRARY_ENTRIES),
+        })),
+      renameLayerLibraryEntry: (id, name) =>
+        set((s) => {
+          const trimmed = name.trim();
+          // Keep the array reference stable for a no-op rename so the
+          // IndexedDB persistence (which watches the reference) skips a write.
+          if (!trimmed || !s.layerLibrary.some((e) => e.id === id && e.name !== trimmed)) {
+            return {};
+          }
+          return {
+            layerLibrary: s.layerLibrary.map((e) => (e.id === id ? { ...e, name: trimmed } : e)),
+          };
+        }),
+      deleteLayerLibraryEntry: (id) =>
+        set((s) =>
+          s.layerLibrary.some((e) => e.id === id)
+            ? { layerLibrary: s.layerLibrary.filter((e) => e.id !== id) }
+            : {},
+        ),
 
       setTemplateLibrary: (templates) => set({ templateLibrary: templates }),
       saveTemplateEntry: (entry) =>

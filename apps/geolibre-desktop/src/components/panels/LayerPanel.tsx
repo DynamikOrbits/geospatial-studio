@@ -20,6 +20,9 @@ import {
   isDuckDBQueryLayer,
   PLANET_SWITCHER_OPTIONS,
   isStyleLibraryTargetLayer,
+  canSaveLayerToLibrary,
+  captureLayerLibraryEntry,
+  createLayerLibraryEntryId,
   copyableLayerStyleKind,
   pluginOwnsPaint,
   supportsBridgedOpacity,
@@ -42,6 +45,8 @@ import {
   sampleTileFeatureRecords,
   BASEMAP_CONTROL_PLUGIN_ID,
   GEO_EDITOR_PLUGIN_ID,
+  isEmbeddableLocalVectorLayer,
+  materializeEmbeddableVectorLayers,
   RASTER_SOURCE_KIND,
   reloadVectorControlLayer,
   SKETCHES_SOURCE_KIND,
@@ -123,6 +128,7 @@ import {
   GripVertical,
   Info,
   Layers,
+  Library,
   Locate,
   Map as MapIcon,
   MoreHorizontal,
@@ -164,6 +170,7 @@ import {
   reloadLocalFileLayer,
   setLayerWatchConfig,
 } from "../../lib/local-file-watch";
+import { canRestoreLibraryLayer } from "../../lib/restore-library-layer";
 import {
   getSqlQueryLayerConfig,
   isSqlQueryLayer,
@@ -601,6 +608,7 @@ export function LayerPanel({
   const copyLayerStyle = useAppStore((s) => s.copyLayerStyle);
   const pasteLayerStyle = useAppStore((s) => s.pasteLayerStyle);
   const copiedLayerStyle = useAppStore((s) => s.copiedLayerStyle);
+  const saveLayerLibraryEntry = useAppStore((s) => s.saveLayerLibraryEntry);
   const setStyleManagerOpen = useAppStore((s) => s.setStyleManagerOpen);
   const setAttributeTableOpen = useAppStore((s) => s.setAttributeTableOpen);
   const setRasterAttributeTableOpen = useAppStore((s) => s.setRasterAttributeTableOpen);
@@ -742,6 +750,9 @@ export function LayerPanel({
   // Same stray-blur guard as suppressBlurCommitRef, for the group rename input.
   const suppressGroupBlurCommitRef = useRef(false);
   const refreshingLayerIdsRef = useRef(new Set<string>());
+  // Layer ids with a Save to My Data in flight, so a repeat click during the
+  // vector-control materialize cannot create a duplicate library entry.
+  const savingToLibraryIdsRef = useRef(new Set<string>());
   const refreshTimersRef = useRef(new Map<string, LayerRefreshTimer>());
   const refreshStatusTimersRef = useRef(new Map<string, number>());
   // Active filesystem watchers for "watch local file" layers, keyed by layer id.
@@ -1025,6 +1036,62 @@ export function LayerPanel({
       scheduleStatusClear(layer.id);
     },
     [pasteLayerStyle, clearRefreshStatusTimer, scheduleStatusClear, t],
+  );
+
+  /**
+   * Save a fully configured layer to the app-level Layer Library (issue #1520)
+   * so it can be re-added to any later project from the Browser panel's My Data
+   * section. Reuses the per-layer status row for feedback, like the style
+   * copy/paste actions above.
+   *
+   * An Add Vector Layer layer holds its features in the control, not the store,
+   * so its current data is read from there first — the same materialization the
+   * project Embed/Share flow uses — instead of relying on the store's
+   * attribute-table copy, which a tiles-mode layer does not have.
+   */
+  const handleSaveToLibrary = useCallback(
+    async (layer: GeoLibreLayer) => {
+      // Guard re-entrancy across the materialize await below: a second invocation
+      // for the same layer before the first resolves would save two entries under
+      // two freshly generated ids (mirrors handleRefreshLayer's
+      // refreshingLayerIdsRef).
+      if (savingToLibraryIdsRef.current.has(layer.id)) return;
+      savingToLibraryIdsRef.current.add(layer.id);
+      try {
+        const features = isEmbeddableLocalVectorLayer(layer)
+          ? (await materializeEmbeddableVectorLayers([layer])).get(layer.id)
+          : undefined;
+        // The materialize await can outlive a concurrent style/opacity/join edit,
+        // so capture from the current layer rather than the closure's snapshot
+        // (mirrors handleImportStyle / handleSaveEditsToSource).
+        const latest = useAppStore.getState().layers.find((l) => l.id === layer.id) ?? layer;
+        const result = captureLayerLibraryEntry(latest, {
+          id: createLayerLibraryEntryId(),
+          addedAt: new Date().toISOString(),
+          ...(features ? { features } : {}),
+        });
+        clearRefreshStatusTimer(layer.id);
+        setRefreshStatuses((current) => ({
+          ...current,
+          [layer.id]: result.ok
+            ? { type: "success", message: t("layers.savedToLibrary", { name: layer.name }) }
+            : {
+                type: "error",
+                message:
+                  result.reason === "features-too-large"
+                    ? t("layers.saveToLibraryTooLarge")
+                    : result.reason === "config-too-large"
+                      ? t("layers.saveToLibraryConfigTooLarge")
+                      : t("layers.saveToLibraryNoSource"),
+              },
+        }));
+        scheduleStatusClear(layer.id);
+        if (result.ok) saveLayerLibraryEntry(result.entry);
+      } finally {
+        savingToLibraryIdsRef.current.delete(layer.id);
+      }
+    },
+    [saveLayerLibraryEntry, clearRefreshStatusTimer, scheduleStatusClear, t],
   );
 
   const handleRefreshLayer = useCallback(
@@ -2555,6 +2622,19 @@ export function LayerPanel({
             // GeoJSON and vector tiles), not just the export-capable GeoJSON
             // layers. Shares the Style Manager's gate so the two can't drift.
             const canImportStyle = isStyleLibraryTargetLayer(layer.type);
+            // Saving the whole layer (source + style + labels + filters + joins)
+            // to the Layer Library needs something re-addable to point at AND a
+            // way to render it again (issue #1520), so a layer with no source and
+            // no features is excluded — and so is a control-painted layer whose
+            // kind has no restore route, which would otherwise re-add blank.
+            // `hasMaterializableFeatures` is the same predicate the save handler
+            // uses to read features out of the vector control, so the menu never
+            // hides a layer the capture path could in fact embed (a tiles-mode
+            // Add Vector Layer layer has no `layer.geojson` to look at).
+            const canSaveToLibrary = canSaveLayerToLibrary(layer, {
+              canRestoreControlPainted: canRestoreLibraryLayer,
+              hasMaterializableFeatures: isEmbeddableLocalVectorLayer,
+            });
             // Copy/paste symbology (issue #1339). Vector-styled layers and
             // deck.gl rasters each copy their own style family; a paste only
             // lands when the clipboard entry shares the target's family.
@@ -3226,6 +3306,23 @@ export function LayerPanel({
                                 )}
                               </DropdownMenuSubContent>
                             </DropdownMenuSub>
+                          )}
+                          {/* Save the whole configured layer to the Layer
+                          Library (issue #1520): its source spec plus style,
+                          labels, filters, and joins, re-addable from the Browser
+                          panel's My Data section in any later project. */}
+                          {canSaveToLibrary && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  void handleSaveToLibrary(layer);
+                                }}
+                              >
+                                <Library className="me-2 h-3.5 w-3.5" />
+                                {t("layers.saveToLibrary")}
+                              </DropdownMenuItem>
+                            </>
                           )}
                           {/* Copy/paste symbology between layers (issue #1339),
                           for vector-styled layers and deck.gl rasters. Paste is
