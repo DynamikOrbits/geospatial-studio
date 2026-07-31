@@ -568,6 +568,7 @@ export function LayerPanel({
   const setLayerGroupOpacity = useAppStore((s) => s.setLayerGroupOpacity);
   const toggleLayerGroupCollapsed = useAppStore((s) => s.toggleLayerGroupCollapsed);
   const moveLayerToGroup = useAppStore((s) => s.moveLayerToGroup);
+  const moveLayerGroupToGroup = useAppStore((s) => s.moveLayerGroupToGroup);
   const reorderLayerGroup = useAppStore((s) => s.reorderLayerGroup);
   const selectedLayerId = useAppStore((s) => s.selectedLayerId);
   const selectLayer = useAppStore((s) => s.selectLayer);
@@ -774,6 +775,52 @@ export function LayerPanel({
     () => new Map(layerGroups.map((g) => [g.id, g] as const)),
     [layerGroups],
   );
+  const groupDepth = useCallback(
+    (group: LayerGroup) => {
+      let depth = 0;
+      let parentId = group.parentId;
+      const visited = new Set([group.id]);
+      while (parentId && !visited.has(parentId)) {
+        visited.add(parentId);
+        const parent = groupById.get(parentId);
+        if (!parent) break;
+        depth += 1;
+        parentId = parent.parentId;
+      }
+      return depth;
+    },
+    [groupById],
+  );
+  const hasCollapsedAncestor = useCallback(
+    (group: LayerGroup) => {
+      let parentId = group.parentId;
+      const visited = new Set([group.id]);
+      while (parentId && !visited.has(parentId)) {
+        visited.add(parentId);
+        const parent = groupById.get(parentId);
+        if (!parent) return false;
+        if (parent.collapsed) return true;
+        parentId = parent.parentId;
+      }
+      return false;
+    },
+    [groupById],
+  );
+  const groupMoveTargets = useCallback(
+    (group: LayerGroup) =>
+      layerGroups.filter((candidate) => {
+        if (candidate.id === group.id) return false;
+        let parentId: string | undefined = candidate.parentId;
+        const visited = new Set<string>();
+        while (parentId && !visited.has(parentId)) {
+          if (parentId === group.id) return false;
+          visited.add(parentId);
+          parentId = groupById.get(parentId)?.parentId;
+        }
+        return true;
+      }),
+    [groupById, layerGroups],
+  );
   const firstMemberIdByGroup = useMemo(() => {
     const map = new Map<string, string>();
     for (const layer of visibleLayers) {
@@ -783,11 +830,50 @@ export function LayerPanel({
     }
     return map;
   }, [visibleLayers]);
+  const descendantLayerAnchorByGroup = useMemo(() => {
+    const result = new Map<string, string>();
+    const displayGroupIds = visibleLayers
+      .map((layer) => layer.groupId)
+      .filter((id): id is string => Boolean(id && groupById.has(id)));
+    for (const group of layerGroups) {
+      if (firstMemberIdByGroup.has(group.id)) continue;
+      const anchor = displayGroupIds.find((candidateId) => {
+        let parentId = groupById.get(candidateId)?.parentId;
+        const visited = new Set<string>();
+        while (parentId && !visited.has(parentId)) {
+          if (parentId === group.id) return true;
+          visited.add(parentId);
+          parentId = groupById.get(parentId)?.parentId;
+        }
+        return false;
+      });
+      if (anchor) result.set(group.id, anchor);
+    }
+    return result;
+  }, [firstMemberIdByGroup, groupById, layerGroups, visibleLayers]);
+  const organizerHeadersByAnchor = useMemo(() => {
+    const result = new Map<string, LayerGroup[]>();
+    for (const group of layerGroups) {
+      const anchor = descendantLayerAnchorByGroup.get(group.id);
+      if (!anchor) continue;
+      const headers = result.get(anchor) ?? [];
+      headers.push(group);
+      result.set(anchor, headers);
+    }
+    for (const headers of result.values()) {
+      headers.sort((a, b) => groupDepth(a) - groupDepth(b));
+    }
+    return result;
+  }, [descendantLayerAnchorByGroup, groupDepth, layerGroups]);
   // Empty folders have no member to anchor them, so they render pinned at the
   // top of the panel where they are easy to drop layers into.
   const emptyGroups = useMemo(
-    () => layerGroups.filter((g) => !firstMemberIdByGroup.has(g.id)),
-    [layerGroups, firstMemberIdByGroup],
+    () =>
+      layerGroups.filter(
+        (group) =>
+          !firstMemberIdByGroup.has(group.id) && !descendantLayerAnchorByGroup.has(group.id),
+      ),
+    [descendantLayerAnchorByGroup, firstMemberIdByGroup, layerGroups],
   );
   // Resize the metadata dialog from its bottom-end grip. The dialog is centred
   // via a -50% transform, so each edge moves by half the size change; growing
@@ -1024,7 +1110,10 @@ export function LayerPanel({
       clearRefreshStatusTimer(layer.id);
       setRefreshStatuses((current) => ({
         ...current,
-        [layer.id]: { type: "success", message: t("layers.styleCopied", { name: layer.name }) },
+        [layer.id]: {
+          type: "success",
+          message: t("layers.styleCopied", { name: layer.name }),
+        },
       }));
       scheduleStatusClear(layer.id);
     },
@@ -1042,7 +1131,10 @@ export function LayerPanel({
       clearRefreshStatusTimer(layer.id);
       setRefreshStatuses((current) => ({
         ...current,
-        [layer.id]: { type: "success", message: t("layers.stylePasted", { name: sourceName }) },
+        [layer.id]: {
+          type: "success",
+          message: t("layers.stylePasted", { name: sourceName }),
+        },
       }));
       scheduleStatusClear(layer.id);
     },
@@ -1085,7 +1177,10 @@ export function LayerPanel({
         setRefreshStatuses((current) => ({
           ...current,
           [layer.id]: result.ok
-            ? { type: "success", message: t("layers.savedToLibrary", { name: layer.name }) }
+            ? {
+                type: "success",
+                message: t("layers.savedToLibrary", { name: layer.name }),
+              }
             : {
                 type: "error",
                 message:
@@ -1346,7 +1441,10 @@ export function LayerPanel({
       fileMeta: {
         defaultName: string;
         filters: { name: string; extensions: string[] }[];
-        browserTypes: { description: string; accept: Record<string, string[]> }[];
+        browserTypes: {
+          description: string;
+          accept: Record<string, string[]>;
+        }[];
         mimeType: string;
       },
     ) => {
@@ -1470,7 +1568,12 @@ export function LayerPanel({
         {
           defaultName: `${sanitizeExportFileName(layer.name)}.qml`,
           filters: [{ name: "QGIS QML", extensions: ["qml"] }],
-          browserTypes: [{ description: "QGIS QML", accept: { "application/xml": [".qml"] } }],
+          browserTypes: [
+            {
+              description: "QGIS QML",
+              accept: { "application/xml": [".qml"] },
+            },
+          ],
           mimeType: "application/xml",
         },
       ),
@@ -1809,7 +1912,9 @@ export function LayerPanel({
       }
       extent = { min, max };
     }
-    const binding = buildTimeBindingFromRecords(bindRecords, bindProperty, { extent });
+    const binding = buildTimeBindingFromRecords(bindRecords, bindProperty, {
+      extent,
+    });
     if (!binding) {
       // Keep the dialog open and explain why, rather than closing silently.
       setBindError(t("layers.bindNoTimestamps"));
@@ -2240,10 +2345,11 @@ export function LayerPanel({
   };
 
   const renderGroupHeader = (group: LayerGroup) => {
+    if (hasCollapsedAncestor(group)) return null;
     const isDropTarget = dropTargetGroupId === group.id;
-    // Empty folders have no members in the flat `layers` array, so
-    // reorderLayerGroup cannot move them; disable the reorder actions for them.
-    const canReorderGroup = firstMemberIdByGroup.has(group.id);
+    const canReorderGroup =
+      firstMemberIdByGroup.has(group.id) || descendantLayerAnchorByGroup.has(group.id);
+    const moveTargets = groupMoveTargets(group);
     return (
       <div
         data-group-header=""
@@ -2254,6 +2360,10 @@ export function LayerPanel({
             ? "border-primary bg-primary/10"
             : "border-border bg-muted/30 hover:border-muted-foreground/40"
         }`}
+        style={{
+          marginInlineStart: `${groupDepth(group)}rem`,
+          width: `calc(100% - ${groupDepth(group)}rem)`,
+        }}
         onDragOver={(e) => handleGroupHeaderDragOver(e, group.id)}
         onDrop={(e) => handleGroupHeaderDrop(e, group.id)}
       >
@@ -2353,6 +2463,31 @@ export function LayerPanel({
                 <Pencil className="me-2 h-3.5 w-3.5" />
                 {t("layers.renameGroup")}
               </DropdownMenuItem>
+              {moveTargets.length > 0 && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Folder className="h-3.5 w-3.5" />
+                    {t("layers.moveToGroup")}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {moveTargets.map((target) => (
+                      <DropdownMenuItem
+                        key={target.id}
+                        disabled={group.parentId === target.id}
+                        onSelect={() => moveLayerGroupToGroup(group.id, target.id)}
+                      >
+                        {target.name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              )}
+              {group.parentId && (
+                <DropdownMenuItem onSelect={() => moveLayerGroupToGroup(group.id, null)}>
+                  <FolderMinus className="me-2 h-3.5 w-3.5" />
+                  {t("layers.removeFromGroup")}
+                </DropdownMenuItem>
+              )}
               {/* Action items below omit preventDefault so Radix dismisses the
                   menu on select; only the rename item above keeps it, so the
                   menu's close does not race its input autofocus. */}
@@ -2563,6 +2698,7 @@ export function LayerPanel({
             const group = layer.groupId ? groupById.get(layer.groupId) : undefined;
             const isFirstOfGroup = group ? firstMemberIdByGroup.get(group.id) === layer.id : false;
             const groupCollapsed = group?.collapsed ?? false;
+            const groupAncestorCollapsed = group ? hasCollapsedAncestor(group) : false;
             // When the parent group is hidden, a layer whose own visibility
             // toggle is still on is not rendered — a surprising state. Grey its
             // name out as a cue that the group-level setting is what's hiding
@@ -2695,8 +2831,15 @@ export function LayerPanel({
             const isRefreshing = refreshStatus?.type === "refreshing";
             return (
               <Fragment key={layer.id}>
+                {isFirstOfGroup &&
+                  group &&
+                  organizerHeadersByAnchor
+                    .get(group.id)
+                    ?.map((organizer) => (
+                      <Fragment key={organizer.id}>{renderGroupHeader(organizer)}</Fragment>
+                    ))}
                 {isFirstOfGroup && group && renderGroupHeader(group)}
-                {!groupCollapsed && (
+                {!groupCollapsed && !groupAncestorCollapsed && (
                   <div
                     data-layer-card=""
                     data-testid="layer-row"
@@ -2706,10 +2849,18 @@ export function LayerPanel({
                         ? "border-primary bg-primary/5"
                         : "border-border bg-background hover:border-muted-foreground/40 hover:bg-muted/20"
                     } ${draggedLayerId === layer.id ? "opacity-50" : ""} ${
-                      // width:auto lets the browser subtract the group margin;
-                      // combining ms-4 with w-full would overflow the panel.
-                      group ? "ms-4" : "w-full"
+                      // Nested rows get a calculated inline width below so
+                      // their indentation cannot overflow the panel.
+                      group ? "" : "w-full"
                     }`}
+                    style={
+                      group
+                        ? {
+                            marginInlineStart: `${groupDepth(group) + 1}rem`,
+                            width: `calc(100% - ${groupDepth(group) + 1}rem)`,
+                          }
+                        : undefined
+                    }
                     onDragOver={(e) => handleLayerDragOver(e, layer.id)}
                     onDrop={(e) => handleLayerDrop(e, layer.id, displayIndex)}
                     onDragEnd={resetDragState}
@@ -2766,7 +2917,9 @@ export function LayerPanel({
                           type="text"
                           className="flex-1 min-w-0 rounded border border-input bg-background px-1 py-0.5 text-sm font-medium outline-none focus:ring-1 focus:ring-ring"
                           value={editingName}
-                          aria-label={t("layers.renameNamed", { name: layer.name })}
+                          aria-label={t("layers.renameNamed", {
+                            name: layer.name,
+                          })}
                           onChange={(e) => setEditingName(e.target.value)}
                           onClick={(e: ReactMouseEvent) => e.stopPropagation()}
                           onFocus={(e) => e.currentTarget.select()}
@@ -3068,7 +3221,10 @@ export function LayerPanel({
                                       runLayerQuickTool(
                                         layer,
                                         "buffer",
-                                        { distance: preset.distance, units: preset.units },
+                                        {
+                                          distance: preset.distance,
+                                          units: preset.units,
+                                        },
                                         t("quickAnalysis.bufferOfLayerName", {
                                           name: layer.name,
                                           distance: formatQuickDistance(preset),
@@ -3088,7 +3244,9 @@ export function LayerPanel({
                                       layer,
                                       "centroids",
                                       {},
-                                      t("quickAnalysis.centroidsLayerName", { name: layer.name }),
+                                      t("quickAnalysis.centroidsLayerName", {
+                                        name: layer.name,
+                                      }),
                                     )
                                   }
                                 >
@@ -3100,7 +3258,9 @@ export function LayerPanel({
                                       layer,
                                       "convex-hull",
                                       {},
-                                      t("quickAnalysis.convexHullLayerName", { name: layer.name }),
+                                      t("quickAnalysis.convexHullLayerName", {
+                                        name: layer.name,
+                                      }),
                                     )
                                   }
                                 >
@@ -3112,7 +3272,9 @@ export function LayerPanel({
                                       layer,
                                       "bounding-box",
                                       {},
-                                      t("quickAnalysis.boundingBoxLayerName", { name: layer.name }),
+                                      t("quickAnalysis.boundingBoxLayerName", {
+                                        name: layer.name,
+                                      }),
                                     )
                                   }
                                 >
