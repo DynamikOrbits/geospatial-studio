@@ -26,6 +26,7 @@ import {
   parseDelimitedTextFields,
   parseDelimitedTextLayer,
 } from "./delimited-text";
+import { IS_MAS_BUILD } from "./build-flags";
 import type { DuckDbVectorFile } from "./duckdb-vector-loader";
 import {
   confirmLargeDataset,
@@ -37,6 +38,7 @@ import { PHOTO_IMAGE_EXTENSIONS, isPhotoDropFileName, isPhotoFileName } from "./
 import { projectedGeoJsonCrs } from "./crs-utils";
 import { parseGpxLayer } from "./gpx";
 import { isTauri } from "./is-tauri";
+import { SHAPEFILE_COMPANION_EXTENSIONS, shapefileCompanionPathsFromSelection } from "./mas-build";
 import {
   parseKmlGroundOverlays,
   parseKmlModels,
@@ -224,11 +226,18 @@ export async function listDirectory(path: string): Promise<LocalDirectoryEntry[]
 
 // Built at call time so the filter-group label shown in the native file dialog
 // is translated (a module-level constant would freeze the English string).
+// The MAS build adds the shapefile companion extensions: the App Sandbox
+// denies the automatic sibling read, so companions must be selectable in the
+// dialog for `readShapefileCompanionFiles` to forward them. Deliberately NOT
+// added to VECTOR_FILE_DIALOG_EXTENSIONS, which doubles as the restore
+// whitelist SYNCed with the Rust guard.
 function vectorFileDialogFilters(): FileDialogFilter[] {
   return [
     {
       name: i18next.t("toolbar.item.vectorDataFilter"),
-      extensions: VECTOR_FILE_DIALOG_EXTENSIONS,
+      extensions: IS_MAS_BUILD
+        ? [...VECTOR_FILE_DIALOG_EXTENSIONS, ...SHAPEFILE_COMPANION_EXTENSIONS]
+        : VECTOR_FILE_DIALOG_EXTENSIONS,
     },
   ];
 }
@@ -1625,9 +1634,10 @@ export async function pickVectorFilesWithSidecars(): Promise<PickedVectorFile[]>
     multiple: true,
   });
   if (!selected) return [];
+  const selectedPaths = Array.isArray(selected) ? selected : [selected];
   // `isVectorFileName` drops rasters, project files, and shapefile sidecars, so
   // a sidecar picked on its own never becomes its own (unreadable) layer.
-  const paths = (Array.isArray(selected) ? selected : [selected]).filter(isVectorFileName);
+  const paths = selectedPaths.filter(isVectorFileName);
   const picked: PickedVectorFile[] = [];
   for (const path of paths) {
     // Read each pick independently so one unreadable file (e.g. moved between
@@ -1635,11 +1645,7 @@ export async function pickVectorFilesWithSidecars(): Promise<PickedVectorFile[]>
     try {
       const file = new File([toArrayBuffer(await readFile(path))], browserSafeFileName(path));
       const companionFiles =
-        fileExtension(path) === "shp"
-          ? (await readShapefileSiblings(path)).map(
-              (sibling) => new File([toArrayBuffer(sibling.data)], sibling.name),
-            )
-          : [];
+        fileExtension(path) === "shp" ? await readShapefileCompanionFiles(path, selectedPaths) : [];
       picked.push({
         file,
         companionFiles,
@@ -1861,6 +1867,38 @@ async function readShapefileSiblings(path: string): Promise<DuckDbVectorFile[]> 
     extension: fileExtension(sibling.name),
     data: new Uint8Array(sibling.data),
   }));
+}
+
+/**
+ * Reads a picked `.shp`'s companion files as browser `File`s: the automatic
+ * sibling read first, then (Mac App Store build only) any companions the user
+ * multi-selected in the same dialog. Under the App Sandbox the sibling read is
+ * denied for files the user did not pick, so the selection is the only way a
+ * loose shapefile keeps its attributes there; picked paths are readable because
+ * the dialog's powerbox grant covers them. Deduplicated by lowercased name with
+ * the sibling read winning, so non-MAS behavior is unchanged.
+ *
+ * @param path - The absolute path of the picked `.shp`.
+ * @param selectedPaths - Every path in the same dialog selection.
+ * @returns The companion `File`s to pass alongside the `.shp`.
+ */
+async function readShapefileCompanionFiles(path: string, selectedPaths: string[]): Promise<File[]> {
+  const files = (await readShapefileSiblings(path)).map(
+    (sibling) => new File([toArrayBuffer(sibling.data)], sibling.name),
+  );
+  if (!IS_MAS_BUILD) return files;
+  const seen = new Set(files.map((file) => file.name.toLowerCase()));
+  for (const companionPath of shapefileCompanionPathsFromSelection(path, selectedPaths)) {
+    const name = browserSafeFileName(companionPath);
+    if (seen.has(name.toLowerCase())) continue;
+    try {
+      files.push(new File([toArrayBuffer(await readFile(companionPath))], name));
+      seen.add(name.toLowerCase());
+    } catch (error) {
+      console.warn(`Could not read the selected shapefile companion "${companionPath}".`, error);
+    }
+  }
+  return files;
 }
 
 async function openProjectFileBrowser(): Promise<{
