@@ -2176,6 +2176,20 @@ export async function openProjectFile(): Promise<{
   return { project, path: selected };
 }
 
+/** Pick a QGIS project and return its raw bytes for the import converter. */
+export async function openQgisProjectFile(): Promise<{
+  data: ArrayBuffer;
+  path: string;
+} | null> {
+  const result = await openLocalDataFileWithFallback({
+    filters: [{ name: "QGIS Project", extensions: ["qgz", "qgs"] }],
+    accept: ".qgz,.qgs",
+    readBinary: true,
+  });
+  if (!result?.data) return null;
+  return { data: result.data, path: result.path };
+}
+
 /**
  * Thrown when a recent project is permanently gone (HTTP 404/410 or a local
  * file that no longer exists), signalling the caller that the entry can be
@@ -2496,9 +2510,19 @@ export function loadDroppedRasterFiles(droppedFiles: FileList | File[]): Dropped
  * these with byte-range support, so a COG opens lazily instead of copying the
  * entire file over IPC and then copying it again into a browser File.
  */
-export async function loadDroppedRasterPaths(paths: string[]): Promise<DroppedRaster[]> {
+export async function loadDroppedRasterPaths(
+  paths: string[],
+  options?: { qgisProjectPath?: string },
+): Promise<DroppedRaster[]> {
   const rasterPaths = paths.filter(isRasterFileName);
-  await Promise.all(rasterPaths.map((path) => invoke("allow_raster_asset", { path })));
+  await Promise.all(
+    rasterPaths.map((path) =>
+      invoke("allow_raster_asset", {
+        path,
+        ...(options?.qgisProjectPath ? { qgisProjectPath: options.qgisProjectPath } : {}),
+      }),
+    ),
+  );
   return rasterPaths.map((path) => ({
     name: fileBaseName(path),
     source: convertFileSrc(path),
