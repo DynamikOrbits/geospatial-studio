@@ -567,6 +567,11 @@ export interface AppState {
   setLayerVirtualFields: (id: string, fields: LayerVirtualField[]) => void;
   reorderLayer: (id: string, direction: "up" | "down") => void;
   moveLayer: (id: string, targetIndex: number) => void;
+  moveLayersRelative: (
+    layerIds: string[],
+    targetLayerId: string,
+    position: "above" | "below",
+  ) => void;
   addGeoJsonLayer: (
     name: string,
     geojson: FeatureCollection,
@@ -617,6 +622,11 @@ export interface AppState {
   toggleLayerGroupCollapsed: (id: string) => void;
   moveLayerToGroup: (
     layerId: string,
+    groupId: string | null,
+    beforeLayerId?: string | null,
+  ) => void;
+  moveLayersToGroup: (
+    layerIds: string[],
     groupId: string | null,
     beforeLayerId?: string | null,
   ) => void;
@@ -1684,6 +1694,36 @@ export const useAppStore = create<AppState>()(
           return { layers: next, isDirty: true };
         }),
 
+      moveLayersRelative: (layerIds, targetLayerId, position) =>
+        set((s) => {
+          const requestedIds = new Set(layerIds);
+          if (requestedIds.has(targetLayerId)) return s;
+          const target = s.layers.find((layer) => layer.id === targetLayerId);
+          if (!target) return s;
+          const targetGroupId = target.groupId ?? null;
+          // This is a pure reorder — `groupId` is never touched — so a requested
+          // layer from another group can only be lifted out of its own block,
+          // and `normalizeGroupContiguity` would then drag that group's
+          // untouched members along to reunite it. Move only the layers that
+          // already sit in the target's group.
+          const moving = s.layers.filter(
+            (layer) => requestedIds.has(layer.id) && (layer.groupId ?? null) === targetGroupId,
+          );
+          if (moving.length === 0) return s;
+          const movingIds = new Set(moving.map((layer) => layer.id));
+          const without = s.layers.filter((layer) => !movingIds.has(layer.id));
+          const targetIndex = without.findIndex((layer) => layer.id === targetLayerId);
+          if (targetIndex < 0) return s;
+          // Store order is the reverse of panel display order, so "above" is
+          // immediately after the target in this array.
+          const insertIndex = position === "above" ? targetIndex + 1 : targetIndex;
+          const next = [...without];
+          next.splice(insertIndex, 0, ...moving);
+          const normalized = normalizeGroupContiguity(next);
+          if (normalized.every((layer, index) => layer.id === s.layers[index]?.id)) return s;
+          return { layers: normalized, isDirty: true };
+        }),
+
       addGeoJsonLayer: (name, geojson, sourcePath, beforeLayerId = null) => {
         const id = uuidv4();
         const layer: GeoLibreLayer = {
@@ -1899,32 +1939,44 @@ export const useAppStore = create<AppState>()(
         })),
 
       moveLayerToGroup: (layerId, groupId, beforeLayerId = null) =>
+        get().moveLayersToGroup([layerId], groupId, beforeLayerId),
+
+      moveLayersToGroup: (layerIds, groupId, beforeLayerId = null) =>
         set((s) => {
-          const current = s.layers.find((l) => l.id === layerId);
-          if (!current) return s;
           if (groupId && !s.layerGroups.some((g) => g.id === groupId)) return s;
-          const updated = { ...current, groupId: groupId ?? undefined };
-          const without = s.layers.filter((l) => l.id !== layerId);
+          const requestedIds = new Set(layerIds);
+          const moving = s.layers.filter(
+            (layer) =>
+              requestedIds.has(layer.id) &&
+              (beforeLayerId !== null || (layer.groupId ?? null) !== groupId),
+          );
+          if (moving.length === 0) return s;
+          const movingIds = new Set(moving.map((layer) => layer.id));
+          const without = s.layers.filter((layer) => !movingIds.has(layer.id));
+          const updated = moving.map((layer) => ({
+            ...layer,
+            groupId: groupId ?? undefined,
+          }));
           let index: number;
-          if (beforeLayerId) {
-            const at = without.findIndex((l) => l.id === beforeLayerId);
+          if (beforeLayerId && !movingIds.has(beforeLayerId)) {
+            const at = without.findIndex((layer) => layer.id === beforeLayerId);
             index = at < 0 ? without.length : at;
           } else if (groupId) {
-            // Append to the end of the target group's block (top of the group
-            // in the panel); fall back to the array end for an empty group.
             let last = -1;
-            without.forEach((l, i) => {
-              if (l.groupId === groupId) last = i;
+            without.forEach((layer, layerIndex) => {
+              if (layer.groupId === groupId) last = layerIndex;
             });
             index = last < 0 ? without.length : last + 1;
           } else {
             index = without.length;
           }
           const next = [...without];
-          next.splice(index, 0, updated);
+          next.splice(index, 0, ...updated);
           const normalized = normalizeGroupContiguity(next);
           const unchanged = normalized.every(
-            (l, i) => l.id === s.layers[i]?.id && l.groupId === s.layers[i]?.groupId,
+            (layer, layerIndex) =>
+              layer.id === s.layers[layerIndex]?.id &&
+              layer.groupId === s.layers[layerIndex]?.groupId,
           );
           if (unchanged) return s;
           return { layers: normalized, isDirty: true };
