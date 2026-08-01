@@ -172,7 +172,9 @@ import {
   isVectorControlRefreshLayer,
   MIN_REFRESH_INTERVAL_MS,
   refreshGeoJsonLayer,
+  setLayerConnectionResult,
   setLayerRefreshConfig,
+  supportsRefreshFailurePolicy,
 } from "../../lib/layer-refresh";
 import {
   getLayerWatchConfig,
@@ -277,6 +279,8 @@ const REFRESH_INTERVAL_OPTIONS: ReadonlyArray<{
 ];
 const CUSTOM_REFRESH_INTERVAL_VALUE = "custom";
 const REFRESH_STATUS_DURATION_MS = 4_000;
+/** How often the durable "Last synced …" labels are recomputed. */
+const SYNC_CLOCK_TICK_MS = 60_000;
 
 /**
  * The Add Data sources a group's "Add data to group" submenu can offer, in Add
@@ -557,6 +561,18 @@ function parseCustomRefreshIntervalMs(value: string): number | null {
   return Math.max(MIN_REFRESH_INTERVAL_MS, Math.round(seconds * 1000));
 }
 
+function relativeSyncTime(iso: string, locale: string): string {
+  const elapsedSeconds = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+  if (!Number.isFinite(elapsedSeconds)) return iso;
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  if (Math.abs(elapsedSeconds) < 60) return formatter.format(elapsedSeconds, "second");
+  const minutes = Math.round(elapsedSeconds / 60);
+  if (Math.abs(minutes) < 60) return formatter.format(minutes, "minute");
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 24) return formatter.format(hours, "hour");
+  return formatter.format(Math.round(hours / 24), "day");
+}
+
 function hasNativeIdentifyLayers(layer: GeoLibreLayer): boolean {
   if (layer.metadata.identifiable === false) return false;
 
@@ -608,6 +624,7 @@ export function LayerPanel({
   const moveLayerGroupToGroup = useAppStore((s) => s.moveLayerGroupToGroup);
   const reorderLayerGroup = useAppStore((s) => s.reorderLayerGroup);
   const selectedLayerId = useAppStore((s) => s.selectedLayerId);
+  const projectGeneration = useAppStore((s) => s.projectGeneration);
   const selectLayer = useAppStore((s) => s.selectLayer);
   const selectedFeatureCount = useAppStore((s) => s.selectedFeatureIds.length);
   // Select by Location needs a second layer to compare against (see EditMenu).
@@ -683,6 +700,11 @@ export function LayerPanel({
   const [layerPendingRemoval, setLayerPendingRemoval] = useState<GeoLibreLayer | null>(null);
   const [refreshSettingsLayerId, setRefreshSettingsLayerId] = useState<string | null>(null);
   const [refreshStatuses, setRefreshStatuses] = useState<Record<string, LayerRefreshStatus>>({});
+  // "Last synced <relative time>" is derived from the clock, not from store
+  // state, so without a tick the label would keep reading "a few seconds ago"
+  // until an unrelated re-render happened to recompute it. Tick once a minute
+  // while the panel is open and at least one layer carries a sync timestamp.
+  const [, setSyncClockTick] = useState(0);
   const [refreshIntervalChoice, setRefreshIntervalChoice] = useState("0");
   const [customRefreshSeconds, setCustomRefreshSeconds] = useState("");
   // Time Slider binding dialog: the target layer, the detected timestamp
@@ -724,6 +746,15 @@ export function LayerPanel({
   // owner applies so every existing call site keeps working.
   const isControlled = controlledCollapsed !== undefined;
   const isCollapsed = isControlled ? controlledCollapsed : internalCollapsed;
+  const hasSyncTimestamps = layers.some((layer) => Boolean(layer.connection?.lastSyncedAt));
+  useEffect(() => {
+    if (isCollapsed || !hasSyncTimestamps) return;
+    const timer = window.setInterval(
+      () => setSyncClockTick((tick) => tick + 1),
+      SYNC_CLOCK_TICK_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [isCollapsed, hasSyncTimestamps]);
   // Quick analysis (#1523): run an existing vector tool over a whole layer from
   // its actions menu, with defaults filled in. No new algorithms — each entry
   // dispatches the same tool the Processing dialog would, so the run shows up in
@@ -1321,6 +1352,10 @@ export function LayerPanel({
 
           updateLayer(layer.id, {
             geojson,
+            ...setLayerConnectionResult(latest, {
+              syncedAt: new Date().toISOString(),
+              error: null,
+            }),
             metadata: {
               ...latest.metadata,
               featureCount,
@@ -1350,6 +1385,10 @@ export function LayerPanel({
 
           updateLayer(layer.id, {
             geojson,
+            ...setLayerConnectionResult(latest, {
+              syncedAt: new Date().toISOString(),
+              error: null,
+            }),
             metadata: {
               ...latest.metadata,
               featureCount,
@@ -1394,6 +1433,18 @@ export function LayerPanel({
           // write would risk clobbering the synced values. `info` feeds only
           // the toast below.
           const featureCount = typeof info.featureCount === "number" ? info.featureCount : null;
+          const latest = useAppStore
+            .getState()
+            .layers.find((candidate) => candidate.id === layer.id);
+          if (latest) {
+            updateLayer(
+              layer.id,
+              setLayerConnectionResult(latest, {
+                syncedAt: new Date().toISOString(),
+                error: null,
+              }),
+            );
+          }
           setRefreshStatuses((current) => ({
             ...current,
             [layer.id]: {
@@ -1419,6 +1470,10 @@ export function LayerPanel({
 
         updateLayer(layer.id, {
           geojson,
+          ...setLayerConnectionResult(latest, {
+            syncedAt: new Date().toISOString(),
+            error: null,
+          }),
           metadata: {
             ...latest.metadata,
             featureCount,
@@ -1440,6 +1495,15 @@ export function LayerPanel({
         scheduleStatusClear(layer.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : t("layers.refreshError");
+        const latest = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
+        if (latest) {
+          updateLayer(layer.id, {
+            ...setLayerConnectionResult(latest, { error: message }),
+            ...(latest.connection?.onFailure === "clear" && latest.geojson
+              ? { geojson: { type: "FeatureCollection" as const, features: [] } }
+              : {}),
+          });
+        }
         setRefreshStatuses((current) => ({
           ...current,
           [layer.id]: {
@@ -2217,6 +2281,7 @@ export function LayerPanel({
 
       if (existing) window.clearInterval(existing.timer);
       const timer = window.setInterval(() => {
+        if (document.hidden) return;
         const latest = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
         if (!latest) return;
 
@@ -2237,6 +2302,28 @@ export function LayerPanel({
       refreshTimersRef.current.delete(id);
     }
   }, [layers]);
+
+  // Timers pause while the tab is hidden. On return, immediately catch up any
+  // connection whose last successful sync is older than its configured cadence.
+  useEffect(() => {
+    const catchUp = () => {
+      if (document.hidden) return;
+      const now = Date.now();
+      for (const layer of useAppStore.getState().layers) {
+        const config = getLayerRefreshConfig(layer);
+        if (!config.enabled || !isRefreshableLayer(layer)) continue;
+        const lastSynced = layer.connection?.lastSyncedAt
+          ? new Date(layer.connection.lastSyncedAt).getTime()
+          : 0;
+        if (!Number.isFinite(lastSynced) || now - lastSynced >= config.intervalMs) {
+          void handleRefreshLayerRef.current(layer, true);
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", catchUp);
+    catchUp();
+    return () => document.removeEventListener("visibilitychange", catchUp);
+  }, [projectGeneration]);
 
   // Watch-mode lifecycle: for each local-file layer with watch enabled, register
   // a debounced filesystem watcher that reloads the layer when the file changes.
@@ -2359,6 +2446,25 @@ export function LayerPanel({
           intervalMs,
         }),
       );
+    },
+    [updateLayer],
+  );
+
+  const setRefreshFailurePolicy = useCallback(
+    (layer: GeoLibreLayer, onFailure: "keep-last" | "clear") => {
+      const latest =
+        useAppStore.getState().layers.find((candidate) => candidate.id === layer.id) ?? layer;
+      const config = getLayerRefreshConfig(latest);
+      updateLayer(layer.id, {
+        ...setLayerRefreshConfig(latest, config),
+        connection: {
+          layerId: layer.id,
+          interval: config.enabled ? config.intervalMs / 1000 : null,
+          lastSyncedAt: latest.connection?.lastSyncedAt ?? null,
+          lastError: latest.connection?.lastError ?? null,
+          onFailure,
+        },
+      });
     },
     [updateLayer],
   );
@@ -2950,7 +3056,24 @@ export function LayerPanel({
             // and watched for changes instead of the URL-based refresh above.
             const canWatchLocalFile = isTauri() && isLocalFileLayer(layer);
             const watchConfig = getLayerWatchConfig(layer);
-            const refreshStatus = refreshStatuses[layer.id];
+            const transientRefreshStatus = refreshStatuses[layer.id];
+            const refreshStatus: LayerRefreshStatus | undefined =
+              transientRefreshStatus ??
+              (layer.connection?.lastError
+                ? {
+                    type: "error",
+                    message: t("layers.syncErrorStatus", {
+                      message: layer.connection.lastError,
+                    }),
+                  }
+                : layer.connection?.lastSyncedAt
+                  ? {
+                      type: "success",
+                      message: t("layers.lastSynced", {
+                        time: relativeSyncTime(layer.connection.lastSyncedAt, i18n.language),
+                      }),
+                    }
+                  : undefined);
             const isRefreshing = refreshStatus?.type === "refreshing";
             const moveIds = selectedMoveIds(layer.id);
             return (
@@ -3092,6 +3215,7 @@ export function LayerPanel({
                     )}
                     {refreshStatus && (
                       <p
+                        title={layer.connection?.lastError ?? layer.connection?.lastSyncedAt ?? ""}
                         className={`mt-1 text-[10px] ${
                           refreshStatus.type === "error"
                             ? "text-destructive"
@@ -4102,6 +4226,30 @@ export function LayerPanel({
                     <p className="text-xs text-destructive">{t("layers.enterPositiveSeconds")}</p>
                   )}
                 </div>
+              )}
+              {/* Vector-control layers keep their features in the external
+                  control, so "clear the layer" cannot be honored for them and
+                  the whole policy picker is hidden rather than offering a
+                  setting that silently does nothing. */}
+              {supportsRefreshFailurePolicy(refreshSettingsLayer) && (
+                <>
+                  <Label htmlFor="layer-refresh-failure-policy">
+                    {t("layers.refreshFailurePolicy")}
+                  </Label>
+                  <Select
+                    id="layer-refresh-failure-policy"
+                    value={refreshSettingsLayer.connection?.onFailure ?? "keep-last"}
+                    onChange={(event) =>
+                      setRefreshFailurePolicy(
+                        refreshSettingsLayer,
+                        event.target.value === "clear" ? "clear" : "keep-last",
+                      )
+                    }
+                  >
+                    <option value="keep-last">{t("layers.refreshFailureKeepLast")}</option>
+                    <option value="clear">{t("layers.refreshFailureClear")}</option>
+                  </Select>
+                </>
               )}
             </div>
           )}
