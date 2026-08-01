@@ -28,9 +28,17 @@ import geolibre
 
 m = geolibre.connect()          # or geolibre.Map()
 m.fly_to(-122.4, 37.8, zoom=11) # animate the live map in the left pane
-m.add_geojson(gdf, name="My layer")   # GeoDataFrame, dict, or JSON string
+m.add_geojson(
+    gdf,
+    name="My layer",
+    fillColor="#facc15",
+    strokeColor="#d97706",
+)  # GeoDataFrame, dict, or JSON string
 m.fit_bounds([-123, 37, -122, 38])
 m.set_basemap("https://…/style.json")
+
+# Layer-targeted calls take a layer id. This client is fire-and-forget, so
+# `add_geojson` does not hand one back — see the note below.
 m.set_visibility(layer_id, False)
 m.remove_layer(layer_id)
 ```
@@ -43,6 +51,9 @@ client source: `backend/geolibre_server/notebook_client.py`.
 
 > Read-back queries (e.g. `get_center`) are not exposed by this fire-and-forget
 > client; they need the blocking request/reply path the `geolibre` widget uses.
+> Layer ids come from the same path: this client's `add_geojson` returns
+> `None`, while the widget's ([`geolibre` package](python.md)) returns the new
+> layer's id — which is what the id-taking calls above expect.
 
 ## Driving the map from an external client (VS Code, …)
 
