@@ -282,6 +282,14 @@ export function GpsTrackingDialog({
   const [nmeaStats, setNmeaStats] = useState<NmeaStreamStats | null>(null);
   const [connecting, setConnecting] = useState<NmeaTransport | null>(null);
   const nmeaConnRef = useRef<NmeaConnection | null>(null);
+  /**
+   * Bumped whenever an in-flight connect is superseded — by another connect, a
+   * source change, stopping, or unmount. A Bluetooth `gatt.connect()` can stay
+   * pending for seconds, and nothing stops the user abandoning it meanwhile, so
+   * a late success must close itself rather than silently reactivating a
+   * session the user believes is over (or leaking a port opened after unmount).
+   */
+  const connectGenerationRef = useRef(0);
 
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const markerArrowRef = useRef<HTMLDivElement | null>(null);
@@ -511,7 +519,10 @@ export function GpsTrackingDialog({
     () => () => {
       clearMapArtifacts();
       useAppStore.getState().setGpsStatus(null);
-      // Release the serial port / GATT server so a re-mount can reopen it.
+      // Release the serial port / GATT server so a re-mount can reopen it, and
+      // mark any in-flight connect stale so one that resolves after this closes
+      // itself instead of leaking a device nothing will ever release.
+      connectGenerationRef.current += 1;
       void nmeaConnRef.current?.close();
       nmeaConnRef.current = null;
     },
@@ -526,8 +537,12 @@ export function GpsTrackingDialog({
     });
   }, []);
 
-  /** Close the NMEA connection, if any, and clear its readout. */
-  const disconnectNmea = useCallback(async () => {
+  /**
+   * Release the live connection and clear its readout, leaving the generation
+   * alone. Split from {@link disconnectNmea} so a connect attempt can close a
+   * previous connection without invalidating the generation it just claimed.
+   */
+  const closeNmea = useCallback(async () => {
     const conn = nmeaConnRef.current;
     nmeaConnRef.current = null;
     setNmeaLabel(null);
@@ -541,6 +556,18 @@ export function GpsTrackingDialog({
     }
   }, []);
 
+  /** Abandon any in-flight connect as well as closing the live connection. */
+  const disconnectNmea = useCallback(async () => {
+    connectGenerationRef.current += 1;
+    // Clearing the indicator belongs on the abandon path rather than in
+    // connectNmea's `finally`: an attempt abandoned by a source change or a
+    // stop is stale by the time it resolves, so that `finally` deliberately
+    // skips it, and the buttons would stay disabled showing "Connecting…" for
+    // the rest of the session.
+    setConnecting(null);
+    await closeNmea();
+  }, [closeNmea]);
+
   /**
    * Open an NMEA receiver and start tracking from it. Both transports show a
    * browser device chooser, so this must run from a user gesture; a dismissed
@@ -550,14 +577,33 @@ export function GpsTrackingDialog({
     async (transport: NmeaTransport) => {
       setError(null);
       setNotice(null);
+      // Claim a generation synchronously, before the first await: closing the
+      // previous connection suspends, and two invocations that both captured
+      // afterwards would read the same value and both believe they are current.
+      const generation = ++connectGenerationRef.current;
+      const isStale = () => generation !== connectGenerationRef.current;
+      // Show the indicator before the first await, so there is no window in
+      // which an attempt is in flight but the buttons look idle — closing a
+      // live connection below can take real time. closeNmea deliberately does
+      // not clear it; only the abandon path (disconnectNmea) does.
       setConnecting(transport);
+      // Closes the previous connection without invalidating the generation
+      // just claimed, and cannot reject (closeNmea swallows close failures).
+      await closeNmea();
+      if (isStale()) return;
       try {
-        await disconnectNmea();
         const handlers = {
-          onFix: handleFix,
+          // Both callbacks are generation-guarded: the transport starts reading
+          // before this function commits the connection, so a superseded
+          // attempt could otherwise re-create overlays teardown had cleared, or
+          // tear down a newer connection that replaced it.
+          onFix: (fix: GpsFix) => {
+            if (!isStale()) handleFix(fix);
+          },
           // A dropped device or a read failure stops the session rather than
           // leaving a stale position on the map.
           onError: (err: NmeaError) => {
+            if (isStale()) return;
             setError(nmeaErrorText(err, t));
             setTracking(false);
             void disconnectNmea();
@@ -567,21 +613,31 @@ export function GpsTrackingDialog({
           transport === "serial"
             ? await connectSerialNmea({ baudRate }, handlers)
             : await connectBluetoothNmea(handlers);
+        if (isStale()) {
+          // The user moved on while the device was still opening: release it
+          // rather than resurrecting a session they already abandoned.
+          await conn.close();
+          return;
+        }
         nmeaConnRef.current = conn;
         setNmeaLabel(conn.label);
         setNmeaStats(conn.stats());
         setTracking(true);
       } catch (err) {
+        if (isStale()) return;
         if (err instanceof NmeaError) {
           if (!err.cancelled) setError(nmeaErrorText(err, t));
         } else {
           setError(err instanceof Error ? err.message : t("gps.nmeaConnectFailed"));
         }
       } finally {
-        setConnecting(null);
+        // A superseded attempt must not clear the newer attempt's indicator;
+        // one abandoned by a source change or a stop already had it reset by
+        // disconnectNmea itself.
+        if (!isStale()) setConnecting(null);
       }
     },
-    [baudRate, disconnectNmea, handleFix, t],
+    [baudRate, closeNmea, disconnectNmea, handleFix, t],
   );
 
   // Poll the assembler's counters while connected so the readout shows the
