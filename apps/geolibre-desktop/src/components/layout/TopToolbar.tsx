@@ -26,6 +26,7 @@ import {
   setMapillaryLabels,
   setEarthdataGisLabels,
   setOpenAerialMapLabels,
+  setArcGisHubLabels,
   setHuggingFaceLabels,
   setSourceCoopLabels,
   setReverseGeocodeLabels,
@@ -293,6 +294,34 @@ export function TopToolbar({
       metaBounds: t("openAerialMap.metaBounds"),
       metaSource: t("openAerialMap.metaSource"),
       metaRaw: t("openAerialMap.metaRaw"),
+    });
+    setArcGisHubLabels({
+      hint: t("arcgisHub.hint"),
+      searchPlaceholder: t("arcgisHub.searchPlaceholder"),
+      search: t("arcgisHub.search"),
+      searchCurrentView: t("arcgisHub.searchCurrentView"),
+      enterKeyword: t("arcgisHub.enterKeyword"),
+      loadMore: t("arcgisHub.loadMore"),
+      searching: t("arcgisHub.searching"),
+      loadingMore: t("arcgisHub.loadingMore"),
+      noResults: t("arcgisHub.noResults"),
+      searchError: t("arcgisHub.searchError"),
+      showing: (shown, total) => t("arcgisHub.showing", { shown, total }),
+      noDescription: t("arcgisHub.noDescription"),
+      add: t("arcgisHub.add"),
+      adding: (title) => t("arcgisHub.adding", { title }),
+      added: (title) => t("arcgisHub.added", { title }),
+      addError: t("arcgisHub.addError"),
+      zoom: t("arcgisHub.zoom"),
+      download: t("arcgisHub.download"),
+      preparing: (title) => t("arcgisHub.preparing", { title }),
+      downloading: (completed, total, title) =>
+        t("arcgisHub.downloading", { completed, total, title }),
+      downloadStarted: (title) => t("arcgisHub.downloadStarted", { title }),
+      downloadFirstLayer: (title, layerCount) =>
+        t("arcgisHub.downloadFirstLayer", { title, layerCount }),
+      downloadError: t("arcgisHub.downloadError"),
+      details: t("arcgisHub.details"),
     });
     setEarthdataGisLabels({
       hint: t("earthdataGis.hint"),

@@ -396,6 +396,27 @@ export {
   type OpenAerialMapLabels,
 } from "./plugins/maplibre-openaerialmap";
 export {
+  ARCGIS_HUB_PLUGIN_ID,
+  DEFAULT_ARCGIS_HUB_LABELS,
+  maplibreArcGisHubPlugin,
+  setArcGisHubLabels,
+  type ArcGisHubLabels,
+} from "./plugins/maplibre-arcgis-hub";
+export {
+  ARCGIS_HUB_PAGE_URL,
+  ARCGIS_HUB_PORTAL_URL,
+  arcGisHubItemDataUrl,
+  arcGisHubItemPageUrl,
+  arcGisHubItemThumbnailUrl,
+  buildArcGisHubSearchUrl,
+  fetchFeatureServiceGeoJson,
+  itemBounds as arcGisHubItemBounds,
+  sanitizeArcGisHubSearchText,
+  searchArcGisHub,
+  type ArcGisHubItem,
+  type ArcGisHubSearchResult,
+} from "./plugins/arcgis-hub-api";
+export {
   buildSearchUrl,
   buildTitilerTemplate,
   OAM_DEFAULT_ENDPOINT,
