@@ -332,8 +332,10 @@ export {
   DECK_VIZ_SOURCE_KIND,
   isDeckVizLayer,
 } from "./plugins/deckgl-viz/store-layer";
+export { VIEWER_BLOCKED_PLUGIN_IDS } from "./viewer-plugins";
 export {
   maplibreAnnotationsPlugin,
+  ANNOTATIONS_PLUGIN_ID,
   ANNOTATIONS_SOURCE_KIND,
   setAnnotationLabels,
   type AnnotationLabels,
@@ -367,7 +369,7 @@ export {
   type ViewImportExport,
   type ViewImportChangeCounts,
 } from "./plugins/geo-editor-view-import";
-export { maplibreGeoAgentPlugin } from "./plugins/maplibre-geoagent";
+export { maplibreGeoAgentPlugin, GEOAGENT_PLUGIN_ID } from "./plugins/maplibre-geoagent";
 export { maplibreUsgsLidarPlugin } from "./plugins/maplibre-usgs-lidar";
 export { maplibreNasaEarthdataPlugin } from "./plugins/maplibre-nasa-earthdata";
 export {
