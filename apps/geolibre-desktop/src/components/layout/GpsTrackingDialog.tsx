@@ -18,6 +18,7 @@ import {
 } from "@geolibre/ui";
 import {
   Circle,
+  Crosshair,
   Download,
   LocateFixed,
   MapPin,
@@ -240,6 +241,37 @@ export function GpsTrackingDialog({
 
   const getMap = useCallback(() => mapControllerRef.current?.getMap() ?? null, [mapControllerRef]);
 
+  /**
+   * Center the map on a fix. The first recenter of a session also zooms in;
+   * later ones only pan, so following doesn't fight the user's chosen zoom.
+   */
+  const recenterOnFix = useCallback((map: maplibregl.Map, fix: GpsFix) => {
+    map.easeTo({
+      center: [fix.lng, fix.lat],
+      duration: 500,
+      ...(zoomedRef.current ? {} : { zoom: Math.max(map.getZoom(), 15) }),
+    });
+    zoomedRef.current = true;
+  }, []);
+
+  /**
+   * Toggle follow mode. The ref moves first so a fix arriving before the
+   * re-render doesn't recenter a map the user has just panned away from, and
+   * switching it back on recenters immediately instead of leaving the map
+   * where it was until the next fix.
+   */
+  const setFollowMode = useCallback(
+    (next: boolean) => {
+      followRef.current = next;
+      setFollow(next);
+      if (!next) return;
+      const map = getMap();
+      const fix = lastFixRef.current;
+      if (map && fix) recenterOnFix(map, fix);
+    },
+    [getMap, recenterOnFix],
+  );
+
   const handleFix = useCallback(
     (fix: GpsFix) => {
       lastFixRef.current = fix;
@@ -294,17 +326,10 @@ export function GpsTrackingDialog({
         }
         if (fix.heading != null) markerRef.current.setRotation(fix.heading);
 
-        if (followRef.current) {
-          map.easeTo({
-            center: [fix.lng, fix.lat],
-            duration: 500,
-            ...(zoomedRef.current ? {} : { zoom: Math.max(map.getZoom(), 15) }),
-          });
-          zoomedRef.current = true;
-        }
+        if (followRef.current) recenterOnFix(map, fix);
       }
     },
-    [getMap, setGpsStatus],
+    [getMap, recenterOnFix, setGpsStatus],
   );
 
   // The watchPosition subscription follows `tracking`. On Tauri mobile this
@@ -353,7 +378,7 @@ export function GpsTrackingDialog({
   // subscriptions for the whole session.
   useEffect(() => {
     if (!tracking) return;
-    const onDragStart = () => setFollow(false);
+    const onDragStart = () => setFollowMode(false);
     // Gated on the source actually being gone, so the frequent styledata
     // events fired by ordinary style mutations cost one getSource() check.
     const onStyleData = () => {
@@ -381,7 +406,7 @@ export function GpsTrackingDialog({
       map?.off("dragstart", onDragStart);
       map?.off("styledata", onStyleData);
     };
-  }, [tracking, getMap]);
+  }, [tracking, getMap, setFollowMode]);
 
   const clearMapArtifacts = useCallback(() => {
     markerRef.current?.remove();
@@ -563,6 +588,11 @@ export function GpsTrackingDialog({
           recording={recording}
           stats={stats}
           capturedCount={capturedCount}
+          follow={follow}
+          // Flip the ref, not the rendered `follow`: a drag that has just
+          // turned follow off updates the ref synchronously but the state only
+          // on the next render, so `!follow` could re-disable it instead.
+          onToggleFollow={() => setFollowMode(!followRef.current)}
           onCapture={handleCapturePoint}
           onPause={() => changeRecording("paused")}
           onResume={handleResumeRecording}
@@ -588,7 +618,7 @@ export function GpsTrackingDialog({
                       <input
                         type="checkbox"
                         checked={follow}
-                        onChange={(e) => setFollow(e.target.checked)}
+                        onChange={(e) => setFollowMode(e.target.checked)}
                       />
                       {t("gps.follow")}
                     </label>
@@ -801,6 +831,8 @@ interface FloatingPanelProps {
   recording: RecordingState;
   stats: { distanceM: number; durationS: number; pointCount: number };
   capturedCount: number;
+  follow: boolean;
+  onToggleFollow: () => void;
   onCapture: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -811,12 +843,19 @@ interface FloatingPanelProps {
  * Compact live readout shown while GPS is on and the dialog is closed, so the
  * map stays fully visible in the field. Anchored to the trailing corner to
  * avoid the Field Collection quick-open button at bottom center.
+ *
+ * Carries its own follow toggle: panning the map turns follow off (QGIS-style),
+ * and in the field the dialog is usually closed, so without it the only way
+ * back is to reopen the dialog — which reads as "keep map centered does
+ * nothing".
  */
 function FloatingPanel({
   fix,
   recording,
   stats,
   capturedCount,
+  follow,
+  onToggleFollow,
   onCapture,
   onPause,
   onResume,
@@ -854,6 +893,15 @@ function FloatingPanel({
         <Button size="sm" variant="outline" disabled={!fix} onClick={onCapture}>
           <MapPin className="me-1 h-3.5 w-3.5" />
           {t("gps.capturePoint")}
+        </Button>
+        <Button
+          size="sm"
+          variant={follow ? "default" : "outline"}
+          aria-label={t("gps.follow")}
+          aria-pressed={follow}
+          onClick={onToggleFollow}
+        >
+          <Crosshair className="h-3.5 w-3.5" />
         </Button>
         {recording === "recording" && (
           <Button size="sm" variant="outline" aria-label={t("gps.pause")} onClick={onPause}>
