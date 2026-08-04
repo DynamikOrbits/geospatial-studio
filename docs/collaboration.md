@@ -202,6 +202,18 @@ unset, the hook is inert and all collaboration UI is hidden, so production build
 ship the feature dark. The Tauri CSP `connect-src` must list the wss host (the
 existing `https:` directive does **not** authorize `wss:`).
 
+In the Docker image the same setting is available at **container runtime** as
+`-e GEOLIBRE_COLLAB_URL=…`: the entrypoint validates it, writes it into
+`geolibre-runtime-config.js`, and `resolveCollabBaseUrl()` prefers that over the
+build-time variable — so a prebuilt image can be pointed at a self-hosted relay
+without a rebuild. A value that is not `wss://` (or `ws://` on loopback) fails the
+container boot rather than silently leaving collaboration dark. The entrypoint also
+substitutes the relay's origin into the nginx CSP's `connect-src`
+(`__GEOLIBRE_COLLAB_CONNECT_SRC__` in `docker/nginx.conf`), since that directive
+has no bare `wss:` — so unlike the desktop build below, the web/Docker path needs
+no manual CSP edit. See
+[Run with Docker](getting-started.md#self-hosted-sharing-and-collaboration-servers).
+
 > **Self-hosting note:** the desktop CSP pins `wss://collab.geolibre.app` (plus
 > `ws://localhost`/`127.0.0.1` for dev). Pointing the desktop build at a
 > different relay means updating `connect-src` in
