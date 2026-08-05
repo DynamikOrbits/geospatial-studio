@@ -16,6 +16,7 @@ import type { ParseKeys, TFunction } from "i18next";
 import {
   NETCDF_IMAGE_SOURCE_KIND,
   DEFAULT_BASEMAP,
+  effectiveLayerRenderState,
   getPlanetaryBasemapById,
   getPlanetaryBasemapByStyleUrl,
   isDuckDBQueryLayer,
@@ -2950,12 +2951,22 @@ export function LayerPanel({
             const isFirstOfGroup = group ? firstMemberIdByGroup.get(group.id) === layer.id : false;
             const groupCollapsed = group?.collapsed ?? false;
             const groupAncestorCollapsed = group ? hasCollapsedAncestor(group) : false;
-            // When the parent group is hidden, a layer whose own visibility
+            // When an ancestor group is hidden, a layer whose own visibility
             // toggle is still on is not rendered — a surprising state. Grey its
-            // name out as a cue that the group-level setting is what's hiding
-            // it (issue #430). If the layer's own toggle is also off, the
-            // EyeOff icon already explains it, so skip the group cue then.
-            const groupHidden = group ? !group.visible && layer.visible : false;
+            // name and eye out as a cue that the group-level setting is what's
+            // hiding it (issue #430). If the layer's own toggle is also off,
+            // the EyeOff icon already explains it, so skip the group cue then.
+            // Folded through effectiveLayerRenderState rather than read off the
+            // immediate parent, so a hidden grandparent gets the cue too. Given
+            // the memoized `groupById` rather than the array, so folding every
+            // row does not rebuild that map once per layer.
+            const groupHidden =
+              layer.visible && !effectiveLayerRenderState(layer, groupById).visible;
+            const visibilityToggleLabel = groupHidden
+              ? `${t("layers.hiddenByGroup")} — ${t("layers.hideLayer")}`
+              : layer.visible
+                ? t("layers.hideLayer")
+                : t("layers.showLayer");
             const canIdentify =
               layer.type === "geojson" ||
               isDuckDBQueryLayer(layer) ||
@@ -3172,15 +3183,25 @@ export function LayerPanel({
                       <button
                         type="button"
                         className="rounded p-0.5 hover:bg-muted"
-                        title={layer.visible ? t("layers.hideLayer") : t("layers.showLayer")}
-                        aria-label={layer.visible ? t("layers.hideLayer") : t("layers.showLayer")}
+                        // The eye stays the layer's *own* switch even while a
+                        // group hides it — showing EyeOff here would offer a
+                        // "Show layer" that turns the layer's own toggle off,
+                        // so revealing it later would take two clicks. The
+                        // muted icon plus the tooltip say why it is not drawn.
+                        // Same string for the tooltip and the accessible name,
+                        // so the group-hidden context reaches a screen reader
+                        // and not only a sighted hover.
+                        title={visibilityToggleLabel}
+                        aria-label={visibilityToggleLabel}
                         onClick={(e) => {
                           e.stopPropagation();
                           setLayerVisibility(layer.id, !layer.visible);
                         }}
                       >
                         {layer.visible ? (
-                          <Eye className="h-3.5 w-3.5" />
+                          <Eye
+                            className={`h-3.5 w-3.5 ${groupHidden ? "text-muted-foreground" : ""}`}
+                          />
                         ) : (
                           <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
                         )}
