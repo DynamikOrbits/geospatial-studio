@@ -754,7 +754,8 @@
       "lineWidth": "Line width",
       "extrusion": "3D extrusion",
       "modelUrlPlaceholder": "https://example.com/model.glb"
-    }
+    },
+    "nonGeographicCoordinates": "Coordinates in {{names}} are not longitude/latitude, so nothing will be drawn on the map. The CRS is mislabelled — reproject the data (or fix its .prj) and load it again."
   },
   "offline": {
     "title": "Download Offline Area",

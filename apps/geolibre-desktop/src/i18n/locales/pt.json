@@ -743,7 +743,8 @@
       "errorMaxFeatures": "Informe um valor de máximo de feições igual ou maior que 1.",
       "errorBbox": "Informe a caixa delimitadora como “oeste,sul,leste,norte”.",
       "errorNoFeatures": "Esta coleção não retornou nenhuma feição."
-    }
+    },
+    "nonGeographicCoordinates": "As coordenadas em {{names}} não são de longitude/latitude, portanto nada será desenhado no mapa. O CRS está incorreto — reprojete os dados (ou corrija o .prj) e carregue novamente."
   },
   "offline": {
     "title": "Baixar área offline",
