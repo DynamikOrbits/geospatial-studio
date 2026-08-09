@@ -18,9 +18,13 @@ import {
   type ProjectHistorySnapshot,
 } from "../lib/project-history-store";
 import {
+  announceLiveProjectSession,
+  liveProjectSessionTabs,
   markProjectSession,
   readLastExplicitProjectSave,
   readProjectSessionState,
+  SESSION_HEARTBEAT_MS,
+  shouldOfferProjectRecovery,
 } from "../lib/project-history-session";
 const AUTOSAVE_DELAY_MS = 3_000;
 
@@ -45,15 +49,22 @@ export function useProjectHistory(mapControllerRef: RefObject<MapController | nu
 
   useEffect(() => {
     const crashRecoveryEnabled = !isTauri() && !isEmbedded();
+    // Installed before anything awaits, so a sibling tab probing at the same
+    // moment gets an answer from this one.
+    const stopAnnouncing = crashRecoveryEnabled ? announceLiveProjectSession() : null;
     void (async () => {
       try {
         const entries = await listProjectSnapshots();
         setSnapshots(entries.filter((entry) => entry.projectKey === currentProjectKey()));
         if (crashRecoveryEnabled) {
-          const previousSession = readProjectSessionState();
-          const lastSave = readLastExplicitProjectSave();
           const latest = entries[0];
-          if (previousSession === "open" && latest && (!lastSave || latest.createdAt > lastSave)) {
+          if (
+            shouldOfferProjectRecovery(
+              latest,
+              readProjectSessionState(await liveProjectSessionTabs()),
+              readLastExplicitProjectSave(),
+            )
+          ) {
             setRecoverySnapshot(latest);
           }
         }
@@ -65,7 +76,13 @@ export function useProjectHistory(mapControllerRef: RefObject<MapController | nu
     })();
 
     const markClean = () => markProjectSession("closed");
-    if (crashRecoveryEnabled) window.addEventListener("pagehide", markClean);
+    // A tab open for hours has to stay distinguishable from one that died, so
+    // it restamps its own entry while it lives; see SESSION_HEARTBEAT_MS.
+    let heartbeat: number | null = null;
+    if (crashRecoveryEnabled) {
+      window.addEventListener("pagehide", markClean);
+      heartbeat = window.setInterval(() => markProjectSession("open"), SESSION_HEARTBEAT_MS);
+    }
     const unsubscribe = useAppStore.subscribe((state, previous) => {
       if (
         !state.isDirty ||
@@ -115,6 +132,8 @@ export function useProjectHistory(mapControllerRef: RefObject<MapController | nu
     return () => {
       unsubscribe();
       if (crashRecoveryEnabled) window.removeEventListener("pagehide", markClean);
+      if (heartbeat !== null) window.clearInterval(heartbeat);
+      stopAnnouncing?.();
       if (timerRef.current !== null) window.clearTimeout(timerRef.current);
     };
   }, [mapControllerRef, refresh]);
