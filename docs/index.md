@@ -22,9 +22,18 @@ hide:
       <a class="md-button" href="downloads/">Download app</a>
     </div>
   </div>
-  <figure class="hero__media">
-    <img src="https://files.opengeos.org/GeoLibre-demo.webp" alt="GeoLibre map interface showing the GIS workspace">
-  </figure>
+  <div class="hero__media">
+    <figure>
+      <a href="https://share.geolibre.app/giswqs/3d-tiles" title="Open the 3D Tiles map">
+        <img src="https://assets.geolibre.app/images/GeoLibre-demo.webp" alt="GeoLibre map interface showing the GIS workspace">
+      </a>
+    </figure>
+    <figure>
+      <a href="https://share.geolibre.app/giswqs/nyc-buildings-and-subways" title="Open the New York City buildings and subways map">
+        <img src="https://assets.geolibre.app/images/nyc-buildings.webp" alt="Manhattan buildings extruded in 3D and colored by construction era, with MTA subway lines and stations and an auto-generated legend">
+      </a>
+    </figure>
+  </div>
 </section>
 
 ## What GeoLibre does today
@@ -58,7 +67,7 @@ Add Data covers XYZ, WMS, WFS, WMTS, ArcGIS, and STAC services; GeoParquet, Flat
 <div class="feature-card" markdown>
 ### 1,000+ geoprocessing tools
 
-Run **1,000+ geoprocessing tools** — vector, raster, remote sensing, hydrology, terrain, LiDAR, conversion, network, and projection — from the Whitebox toolbox, browsable by category in the Processing menu. They execute in the browser on a WebAssembly runtime with raster and vector I/O, so there is no Python sidecar to install and the full set works on the web, desktop, and Android. The Conversion menu writes cloud-native GeoParquet, FlatGeobuf, PMTiles, and COG, client-side in the browser build or through the Python sidecar on desktop, whose GDAL stack reads more input formats and tiles deeper.
+Run **1,000+ geoprocessing tools** — vector, raster, remote sensing, hydrology, terrain, LiDAR, conversion, network, and projection — from the Whitebox toolbox, browsable by category in the Processing menu. They execute in the browser on a WebAssembly runtime with raster and vector I/O, so there is no Python sidecar to install and the full set works on the web, desktop, and Android.
 </div>
 
 <div class="feature-card" markdown>
@@ -101,12 +110,6 @@ Chat with your data: a natural-language [assistant](user-guide/ai-assistant.md) 
 ### Collaboration and story maps
 
 Edit the same project with others in real time ([collaboration](collaboration.md) MVP; requires `VITE_GEOLIBRE_COLLAB_URL`), and build scroll-driven [story maps](user-guide/storymaps.md) with a presenter view and a standalone HTML export you can publish anywhere.
-</div>
-
-<div class="feature-card" markdown>
-### Network analysis and geocoding
-
-Compute isochrones, service areas, and origin–destination cost matrices for network analysis, and run forward, batch, and reverse [geocoding](user-guide/data-integrations.md#geocoding) through a multi-provider abstraction with pluggable providers.
 </div>
 
 </div>
