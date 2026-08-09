@@ -34,30 +34,15 @@ export function layerRows(collection: Pick<FeatureCollection, "features">): Char
 }
 
 /**
- * Whether two `[west, south, east, north]` boxes overlap (touching counts).
- * The two boxes need not share a longitude convention: `geometryBounds`
- * returns shifted boxes (east > 180) for antimeridian-crossing features, and
- * `map.getBounds()` can return unwrapped longitudes near the dateline, so the
- * test also tries `b` shifted by ±360° — the same ground box, one world copy
- * over. (A box that is degenerate `west > east` without being unwrapped is
- * not supported, matching the print-extent tool's documented limitation.)
- */
-export function boundsIntersect(a: AtlasBounds, b: AtlasBounds): boolean {
-  if (a[1] > b[3] || b[1] > a[3]) return false;
-  for (const offset of [0, -360, 360]) {
-    if (a[0] <= b[2] + offset && b[0] + offset <= a[2]) return true;
-  }
-  return false;
-}
-
-/**
- * The rows of the features whose geometry bounding box intersects `bounds` —
+ * The rows of the features whose geometry is fully within `bounds` —
  * the per-page filter for atlas data blocks. Takes {@link AtlasFeatureInfo}s
  * (from `collectAtlasFeatures`) rather than raw features so the per-vertex
  * geometry walk runs once per layer, not once per atlas page; features
  * without a usable geometry were already dropped there (they are nowhere on
- * the page). A bbox test (not an exact intersection) matches how atlas pages
- * themselves are framed.
+ * the page). Full containment intentionally excludes features that only clip
+ * the page edge, including features spanning multiple pages, which otherwise
+ * produces surprising table rows for geometry whose visible sliver is easy to
+ * miss.
  */
 export function rowsWithinBounds(
   features: readonly AtlasFeatureInfo[],
@@ -65,7 +50,19 @@ export function rowsWithinBounds(
 ): ChartRow[] {
   const rows: ChartRow[] = [];
   for (const info of features) {
-    if (!boundsIntersect(info.bounds, bounds)) continue;
+    let contained = false;
+    for (const offset of [0, -360, 360]) {
+      if (
+        bounds[0] <= info.bounds[0] + offset &&
+        info.bounds[2] + offset <= bounds[2] &&
+        bounds[1] <= info.bounds[1] &&
+        info.bounds[3] <= bounds[3]
+      ) {
+        contained = true;
+        break;
+      }
+    }
+    if (!contained) continue;
     rows.push({ properties: info.properties });
   }
   return rows;
