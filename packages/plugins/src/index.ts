@@ -58,16 +58,19 @@ export {
 } from "./plugins/maplibre-basemap-control";
 export {
   addArcGISLayer,
+  fetchArcGISMapServiceSublayers,
   ARCGIS_FEATURE_SOURCE_KIND,
   ARCGIS_IMAGE_SERVICE_SOURCE_KIND,
   ARCGIS_LAYER_TYPES,
   ARCGIS_MAP_SERVICE_SOURCE_KIND,
+  ARCGIS_MAP_SERVICE_URL_ERROR,
   parseArcGISLayerType,
   refreshArcGISFeatureLayer,
   reloadArcGISViewportLayer,
   restoreArcGISViewportLayers,
   type ArcGISLayerOptions,
   type ArcGISLayerType,
+  type ArcGISMapServiceSublayer,
   type ArcGISSourceType,
 } from "./plugins/arcgis-layer";
 export {
