@@ -8,6 +8,7 @@ import {
   layerRows,
   MAX_TABLE_ROWS,
   rowForAtlasFeature,
+  rowsIntersectingBounds,
   rowsWithinBounds,
 } from "../apps/geolibre-desktop/src/lib/print-data-blocks";
 import { collectAtlasFeatures } from "../apps/geolibre-desktop/src/lib/print-atlas";
@@ -104,6 +105,232 @@ describe("rowsWithinBounds", () => {
     assert.equal(rowsWithinBounds(dateline, [170, -5, 190, 5]).length, 1);
     assert.equal(rowsWithinBounds(dateline, [-190, -5, -170, 5]).length, 1);
     assert.equal(rowsWithinBounds(dateline, [-10, -5, 10, 5]).length, 0);
+  });
+});
+
+describe("rowsIntersectingBounds", () => {
+  it("includes partially clipped features but excludes disjoint features", () => {
+    const infos = collectAtlasFeatures({
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "partial" },
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [0, 0],
+                [5, 0],
+                [5, 5],
+                [0, 5],
+                [0, 0],
+              ],
+            ],
+          },
+        },
+        point(20, 20, { name: "outside" }),
+      ],
+    });
+    assert.deepEqual(
+      rowsIntersectingBounds(infos, [4, 0, 8, 8]).map((row) => row.properties.name),
+      ["partial"],
+    );
+  });
+
+  it("uses geometry rather than bounding-box overlap", () => {
+    const infos = collectAtlasFeatures({
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "frame" },
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [0, 0],
+                [10, 0],
+                [10, 10],
+                [0, 10],
+                [0, 0],
+              ],
+              [
+                [2, 2],
+                [2, 8],
+                [8, 8],
+                [8, 2],
+                [2, 2],
+              ],
+            ],
+          },
+        },
+      ],
+    });
+    assert.equal(rowsIntersectingBounds(infos, [3, 3, 7, 7]).length, 0);
+  });
+
+  it("matches intersecting features across antimeridian longitude conventions", () => {
+    const infos = collectAtlasFeatures({
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "dateline" },
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [179, 0],
+              [-179, 0],
+            ],
+          },
+        },
+      ],
+    });
+    assert.equal(rowsIntersectingBounds(infos, [178, -1, 180, 1]).length, 1);
+    assert.equal(rowsIntersectingBounds(infos, [-180, -1, -178, 1]).length, 1);
+    assert.equal(rowsIntersectingBounds(infos, [-10, -1, 10, 1]).length, 0);
+  });
+
+  it("matches a page extent several world copies from the canonical range", () => {
+    const infos = collectAtlasFeatures({
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "dateline" },
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [179, 0],
+              [-179, 0],
+            ],
+          },
+        },
+      ],
+    });
+    // The map's unwrapped coordinates after panning two world copies east.
+    assert.equal(rowsIntersectingBounds(infos, [898, -1, 900, 1]).length, 1);
+    assert.equal(rowsWithinBounds(infos, [890, -1, 910, 1]).length, 1);
+    assert.equal(rowsIntersectingBounds(infos, [700, -1, 710, 1]).length, 0);
+  });
+
+  it("unwraps a raw getBounds() page extent reported as west > east", () => {
+    const infos = collectAtlasFeatures({
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "dateline" },
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [179, 0],
+              [-179, 0],
+            ],
+          },
+        },
+        point(0, 0, { name: "greenwich" }),
+      ],
+    });
+    // MapLibre reports a Pacific view as west≈170, east≈-170; read literally
+    // that is the ~340°-wide Eurasian side, which holds "greenwich" instead.
+    assert.deepEqual(
+      rowsIntersectingBounds(infos, [170, -1, -170, 1]).map((row) => row.properties.name),
+      ["dateline"],
+    );
+    assert.deepEqual(
+      rowsWithinBounds(infos, [170, -1, -170, 1]).map((row) => row.properties.name),
+      ["dateline"],
+    );
+  });
+
+  it("shifts a feature touching +180 onto a page extent touching -180", () => {
+    const infos = collectAtlasFeatures({
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "touches" },
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [170, 0],
+              [180, 0],
+            ],
+          },
+        },
+      ],
+    });
+    assert.equal(rowsIntersectingBounds(infos, [-180, -1, -170, 1]).length, 1);
+  });
+
+  it("shifts a dateline feature whose unwrapped bounds already overlap the extent", () => {
+    const infos = collectAtlasFeatures({
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "dateline" },
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [179, 0],
+              [-179, 0],
+            ],
+          },
+        },
+      ],
+    });
+    // `geometryBounds` unwraps this to [179, 0, 181, 0], so the bbox prefilter
+    // matches at offset 0 — but the raw coordinates still run the other way
+    // around the globe and need the shift before the geometry test.
+    assert.equal(rowsIntersectingBounds(infos, [180.25, -1, 180.75, 1]).length, 1);
+  });
+
+  it("handles a GeometryCollection member", () => {
+    const infos = collectAtlasFeatures({
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "collection" },
+          geometry: {
+            type: "GeometryCollection",
+            geometries: [
+              { type: "Point", coordinates: [50, 50] },
+              {
+                type: "LineString",
+                coordinates: [
+                  [1, 1],
+                  [4, 4],
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    assert.equal(rowsIntersectingBounds(infos, [0, 0, 5, 5]).length, 1);
+    assert.equal(rowsIntersectingBounds(infos, [-20, -20, -10, -10]).length, 0);
+  });
+
+  it("drops a degenerate feature instead of throwing", () => {
+    const infos = collectAtlasFeatures({
+      features: [
+        // A ring with fewer than four positions is not a closed polygon.
+        {
+          type: "Feature",
+          properties: { name: "degenerate" },
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [1, 1],
+                [4, 4],
+              ],
+            ],
+          },
+        },
+        point(2, 2, { name: "sound" }),
+      ],
+    });
+    assert.deepEqual(
+      rowsIntersectingBounds(infos, [0, 0, 5, 5]).map((row) => row.properties.name),
+      ["sound"],
+    );
   });
 });
 

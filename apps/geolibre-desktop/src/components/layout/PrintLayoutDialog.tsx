@@ -60,8 +60,10 @@ import {
   layerRows,
   MAX_TABLE_ROWS,
   rowForAtlasFeature,
+  rowsIntersectingBounds,
   rowsWithinBounds,
   type ChartBlockType,
+  type PageFilterMode,
 } from "../../lib/print-data-blocks";
 import {
   categoricalColumns,
@@ -292,7 +294,7 @@ export function PrintLayoutDialog({
   const [tableMaxRows, setTableMaxRows] = useState(DEFAULT_TABLE_ROWS);
   const [tableFitRows, setTableFitRows] = useState(false);
   const [tablePosition, setTablePosition] = useState<BodyCorner>("bottom-left");
-  const [tableFilterToPage, setTableFilterToPage] = useState(true);
+  const [tablePageFilter, setTablePageFilter] = useState<PageFilterMode>("contained");
   const [tableFilterToAtlasFeature, setTableFilterToAtlasFeature] = useState(false);
   const [showDataChart, setShowDataChart] = useState(false);
   const [chartLayerId, setChartLayerId] = useState("");
@@ -304,7 +306,7 @@ export function PrintLayoutDialog({
   // Top-right by default: the scale bar + north arrow duo occupies the
   // bottom-right corner out of the box.
   const [chartPosition, setChartPosition] = useState<BodyCorner>("top-right");
-  const [chartFilterToPage, setChartFilterToPage] = useState(true);
+  const [chartPageFilter, setChartPageFilter] = useState<PageFilterMode>("contained");
   // Cartographic title block ("stempel") fields (GH #522).
   const [showInfoBlock, setShowInfoBlock] = useState(false);
   const [author, setAuthor] = useState("");
@@ -1036,9 +1038,14 @@ export function PrintLayoutDialog({
     (
       features: readonly AtlasFeatureInfo[],
       allRows: ChartRow[],
-      filterOn: boolean,
+      filterMode: PageFilterMode,
       bounds: AtlasBounds | null,
-    ): ChartRow[] => (filterOn && bounds ? rowsWithinBounds(features, bounds) : allRows),
+    ): ChartRow[] => {
+      if (!bounds || filterMode === "all") return allRows;
+      return filterMode === "contained"
+        ? rowsWithinBounds(features, bounds)
+        : rowsIntersectingBounds(features, bounds);
+    },
     [],
   );
 
@@ -1129,14 +1136,14 @@ export function PrintLayoutDialog({
           ? currentAtlasPage
             ? rowForAtlasFeature(tableAllRows, currentAtlasPage.sourceIndex)
             : []
-          : rowsForBlock(tableFeatureInfos, tableAllRows, tableFilterToPage, displayFilterBounds)
+          : rowsForBlock(tableFeatureInfos, tableAllRows, tablePageFilter, displayFilterBounds)
         : [],
     [
       showDataTable,
       rowsForBlock,
       tableFeatureInfos,
       tableAllRows,
-      tableFilterToPage,
+      tablePageFilter,
       tableFilterToAtlasFeature,
       tableUsesAtlasLayer,
       currentAtlasPage,
@@ -1146,14 +1153,14 @@ export function PrintLayoutDialog({
   const displayChartRows = useMemo(
     () =>
       showDataChart
-        ? rowsForBlock(chartFeatureInfos, chartAllRows, chartFilterToPage, displayFilterBounds)
+        ? rowsForBlock(chartFeatureInfos, chartAllRows, chartPageFilter, displayFilterBounds)
         : [],
     [
       showDataChart,
       rowsForBlock,
       chartFeatureInfos,
       chartAllRows,
-      chartFilterToPage,
+      chartPageFilter,
       displayFilterBounds,
     ],
   );
@@ -1725,8 +1732,8 @@ export function PrintLayoutDialog({
             ...buildBlocksFromRows(
               tableFilterToAtlasFeature && tableUsesAtlasLayer
                 ? rowForAtlasFeature(tableAllRows, pages[i].sourceIndex)
-                : rowsForBlock(tableFeatureInfos, tableAllRows, tableFilterToPage, viewBounds),
-              rowsForBlock(chartFeatureInfos, chartAllRows, chartFilterToPage, viewBounds),
+                : rowsForBlock(tableFeatureInfos, tableAllRows, tablePageFilter, viewBounds),
+              rowsForBlock(chartFeatureInfos, chartAllRows, chartPageFilter, viewBounds),
             ),
             title: substituteAtlasTokens(options.title, ctx),
             subtitle: substituteAtlasTokens(options.subtitle, ctx),
@@ -2821,13 +2828,25 @@ export function PrintLayoutDialog({
                       checked={tableFitRows}
                       onChange={setTableFitRows}
                     />
-                    <ToggleField
-                      id="dt-filter-page"
-                      label={t("printLayout.dataBlocks.filterToPage")}
-                      checked={tableFilterToPage}
-                      disabled={tableFilterToAtlasFeature && tableUsesAtlasLayer}
-                      onChange={setTableFilterToPage}
-                    />
+                    <div className="space-y-1.5">
+                      <Label htmlFor="dt-filter-page">
+                        {t("printLayout.dataBlocks.pageFilter")}
+                      </Label>
+                      <Select
+                        id="dt-filter-page"
+                        value={tablePageFilter}
+                        disabled={tableFilterToAtlasFeature && tableUsesAtlasLayer}
+                        onChange={(e) => setTablePageFilter(e.target.value as PageFilterMode)}
+                      >
+                        <option value="all">{t("printLayout.dataBlocks.filterAll")}</option>
+                        <option value="contained">
+                          {t("printLayout.dataBlocks.filterContained")}
+                        </option>
+                        <option value="intersecting">
+                          {t("printLayout.dataBlocks.filterIntersecting")}
+                        </option>
+                      </Select>
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       {t("printLayout.dataBlocks.filterToPageHint")}
                     </p>
@@ -2977,12 +2996,24 @@ export function PrintLayoutDialog({
                         onChange={(e) => setChartTitle(e.target.value)}
                       />
                     </div>
-                    <ToggleField
-                      id="dc-filter-page"
-                      label={t("printLayout.dataBlocks.filterToPage")}
-                      checked={chartFilterToPage}
-                      onChange={setChartFilterToPage}
-                    />
+                    <div className="space-y-1.5">
+                      <Label htmlFor="dc-filter-page">
+                        {t("printLayout.dataBlocks.pageFilter")}
+                      </Label>
+                      <Select
+                        id="dc-filter-page"
+                        value={chartPageFilter}
+                        onChange={(e) => setChartPageFilter(e.target.value as PageFilterMode)}
+                      >
+                        <option value="all">{t("printLayout.dataBlocks.filterAll")}</option>
+                        <option value="contained">
+                          {t("printLayout.dataBlocks.filterContained")}
+                        </option>
+                        <option value="intersecting">
+                          {t("printLayout.dataBlocks.filterIntersecting")}
+                        </option>
+                      </Select>
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       {t("printLayout.dataBlocks.filterToPageHint")}
                     </p>
