@@ -1729,8 +1729,13 @@
     "unit": {
       "meters": "m",
       "kilometers": "km",
-      "miles": "mi"
-    }
+      "miles": "mi",
+      "feet": "ft"
+    },
+    "viewshedHere": "Cuenca visual desde aquí ({{radius}})",
+    "viewshedLayerName": "Cuenca visual ({{radius}})",
+    "viewshedToolName": "Cuenca visual",
+    "viewshedNoResult": "No se pudo calcular un área visible aquí."
   },
   "knowledgeCard": {
     "title": "Información del lugar",

@@ -1729,8 +1729,13 @@
     "unit": {
       "meters": "m",
       "kilometers": "km",
-      "miles": "mi"
-    }
+      "miles": "mi",
+      "feet": "ft"
+    },
+    "viewshedHere": "Viewshed from here ({{radius}})",
+    "viewshedLayerName": "Viewshed ({{radius}})",
+    "viewshedToolName": "Viewshed",
+    "viewshedNoResult": "No visible area could be computed here."
   },
   "knowledgeCard": {
     "title": "Place info",

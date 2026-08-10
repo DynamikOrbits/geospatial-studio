@@ -1686,8 +1686,13 @@
     "unit": {
       "meters": "m",
       "kilometers": "km",
-      "miles": "マイル"
-    }
+      "miles": "マイル",
+      "feet": "ft"
+    },
+    "viewshedHere": "ここからの可視領域 ({{radius}})",
+    "viewshedLayerName": "可視領域 ({{radius}})",
+    "viewshedToolName": "可視領域",
+    "viewshedNoResult": "ここでは可視領域を計算できませんでした。"
   },
   "knowledgeCard": {
     "title": "場所の情報",

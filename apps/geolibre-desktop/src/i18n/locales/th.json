@@ -1686,8 +1686,13 @@
     "unit": {
       "meters": "m",
       "kilometers": "km",
-      "miles": "mi"
-    }
+      "miles": "mi",
+      "feet": "ฟุต"
+    },
+    "viewshedHere": "พื้นที่มองเห็นจากจุดนี้ ({{radius}})",
+    "viewshedLayerName": "พื้นที่มองเห็น ({{radius}})",
+    "viewshedToolName": "พื้นที่มองเห็น",
+    "viewshedNoResult": "ไม่สามารถคำนวณพื้นที่ที่มองเห็นได้ที่นี่"
   },
   "knowledgeCard": {
     "title": "ข้อมูลสถานที่",

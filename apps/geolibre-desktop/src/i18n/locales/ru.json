@@ -1815,8 +1815,13 @@
     "unit": {
       "meters": "м",
       "kilometers": "км",
-      "miles": "ми"
-    }
+      "miles": "ми",
+      "feet": "фут"
+    },
+    "viewshedHere": "Зона видимости отсюда ({{radius}})",
+    "viewshedLayerName": "Зона видимости ({{radius}})",
+    "viewshedToolName": "Зона видимости",
+    "viewshedNoResult": "Здесь не удалось вычислить зону видимости."
   },
   "knowledgeCard": {
     "title": "О месте",
