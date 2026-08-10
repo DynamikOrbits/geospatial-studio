@@ -1085,13 +1085,20 @@ export const MapCanvas = memo(function MapCanvas({
   // map (a keyboard-only toggle) would otherwise leave the last resolved value
   // on screen until the next mousemove.
   useEffect(() => {
-    if (showPointerElevation) return;
-    // invalidate() before clearing: a lookup scheduled inside the 500ms debounce
-    // window would otherwise still fire the request, and only be suppressed
-    // afterwards by the isEnabled() re-check. Cancelling the timer means the
-    // request is never made at all.
-    pointerElevationRef.current?.invalidate();
-    setPointerElevation(null);
+    if (!showPointerElevation) {
+      // invalidate() before clearing: a lookup scheduled inside the 500ms
+      // debounce window would otherwise still fire the request, and only be
+      // suppressed afterwards by the isEnabled() re-check. Cancelling the timer
+      // means the request is never made at all.
+      pointerElevationRef.current?.invalidate();
+      setPointerElevation(null);
+      return;
+    }
+    // Symmetrically, switching it *on* while the cursor sits still would show
+    // nothing until the next mousemove. Resolve once for wherever the pointer
+    // already is, so the readout appears with the toggle.
+    const coords = useAppStore.getState().pointerCoords;
+    if (coords) pointerElevationRef.current?.update(coords);
   }, [showPointerElevation, setPointerElevation]);
   const previousSelectedFeatureKey = useRef<string | null>(null);
   const previousDuckDBSelectionLayerId = useRef<string | null>(null);
