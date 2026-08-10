@@ -1065,6 +1065,7 @@ export const MapCanvas = memo(function MapCanvas({
   const setMapView = useAppStore((s) => s.setMapView);
   const setPointerCoords = useAppStore((s) => s.setPointerCoords);
   const setPointerElevation = useAppStore((s) => s.setPointerElevation);
+  const setCameraAltitude = useAppStore((s) => s.setCameraAltitude);
   const showPointerElevation = useAppStore((s) => s.preferences.map.showPointerElevation);
   const projectGeneration = useAppStore((s) => s.projectGeneration);
   const pointerElevationRef = useRef<PointerElevationResolver | null>(null);
@@ -1168,6 +1169,9 @@ export const MapCanvas = memo(function MapCanvas({
       // overwrite the project's saved view ~60 times a second.
       if (event?.flightCameraToken !== undefined) return;
       setMapView(mc.readView(), Boolean(event?.originalEvent));
+      // Same moveend cadence as zoom/bearing/pitch: a bar where one number is
+      // live and the rest lag during a drag reads as broken.
+      setCameraAltitude(mc.readCameraAltitude());
     };
     map.on("moveend", updateView);
 
@@ -1274,6 +1278,15 @@ export const MapCanvas = memo(function MapCanvas({
       onControllerReadyRef.current?.();
     });
     controller.current?.setStyle(basemapStyleUrl);
+    // Switching the active body without moving the camera -- the planet switcher
+    // or a different planetary basemap -- changes the radius the altitude is
+    // scaled by, but fires no moveend, so the readout would keep the previous
+    // body's number until the next pan. Mirrors how setStyle refreshes the
+    // scale bar for the same reason.
+    setCameraAltitude(controller.current?.readCameraAltitude() ?? null);
+    // setCameraAltitude is a stable store action; the effect is keyed on the
+    // basemap alone so it does not re-run on unrelated store changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemapStyleUrl]);
 
   useEffect(() => {
