@@ -190,7 +190,14 @@
     "elevation": "標高",
     "elevationLong": "標高",
     "cameraAltitude": "視点高度",
-    "cameraAltitudeLong": "海面からのカメラ高度"
+    "cameraAltitudeLong": "海面からのカメラ高度",
+    "coordinateFormat": {
+      "dd": "十進度",
+      "dms": "度分秒",
+      "ddm": "度・十進分",
+      "utm": "UTM（ゾーン、東距/北距）"
+    },
+    "coordinateFormatHint": "座標形式: {{format}}。クリックで切り替え。"
   },
   "fileNamePrompt": {
     "title": "名前を付けて保存",
@@ -1791,7 +1798,9 @@
       "scaleUnitImperial": "ヤード・ポンド法（ft / mi）",
       "scaleUnitNautical": "海里（nmi）",
       "scaleUnitHint": "地図下部のスケールバーに表示する単位を選択します。",
-      "errorBoundsUnavailable": "地図の表示範囲がまだ取得できていません。"
+      "errorBoundsUnavailable": "地図の表示範囲がまだ取得できていません。",
+      "coordinateFormat": "座標形式",
+      "coordinateFormatHint": "ステータスバーがポインター座標を表示する表記です。 ステータスバーの座標をクリックすると表記を切り替えられます。"
     },
     "layout": {
       "title": "レイアウト",

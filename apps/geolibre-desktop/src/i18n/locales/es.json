@@ -192,7 +192,14 @@
     "elevation": "Elev",
     "elevationLong": "Elevación",
     "cameraAltitude": "Alt. cámara",
-    "cameraAltitudeLong": "Altitud de la cámara sobre el nivel del mar"
+    "cameraAltitudeLong": "Altitud de la cámara sobre el nivel del mar",
+    "coordinateFormat": {
+      "dd": "Grados decimales",
+      "dms": "Grados, minutos, segundos",
+      "ddm": "Grados, minutos decimales",
+      "utm": "UTM (huso, este/norte)"
+    },
+    "coordinateFormatHint": "Formato de coordenadas: {{format}}. Haga clic para cambiar."
   },
   "fileNamePrompt": {
     "title": "Guardar archivo como",
@@ -1834,7 +1841,9 @@
       "scaleUnitImperial": "Imperiales (ft / mi)",
       "scaleUnitNautical": "Náuticas (nmi)",
       "scaleUnitHint": "Elija las unidades que se muestran en la barra de escala en la parte inferior del mapa.",
-      "errorBoundsUnavailable": "Los límites del mapa aún no están disponibles."
+      "errorBoundsUnavailable": "Los límites del mapa aún no están disponibles.",
+      "coordinateFormat": "Formato de coordenadas",
+      "coordinateFormatHint": "Notación con la que la barra de estado muestra la coordenada del puntero. Haga clic en las coordenadas de la barra de estado para cambiar de notación."
     },
     "layout": {
       "title": "Diseño",

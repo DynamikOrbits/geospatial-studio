@@ -192,7 +192,14 @@
     "elevation": "ऊँचाई",
     "elevationLong": "ऊँचाई",
     "cameraAltitude": "दृष्टि ऊँचाई",
-    "cameraAltitudeLong": "समुद्र तल से कैमरे की ऊँचाई"
+    "cameraAltitudeLong": "समुद्र तल से कैमरे की ऊँचाई",
+    "coordinateFormat": {
+      "dd": "दशमलव डिग्री",
+      "dms": "अंश, मिनट, सेकंड",
+      "ddm": "अंश, दशमलव मिनट",
+      "utm": "UTM (ज़ोन, पूर्वी/उत्तरी)"
+    },
+    "coordinateFormatHint": "निर्देशांक प्रारूप: {{format}}। बदलने के लिए क्लिक करें।"
   },
   "fileNamePrompt": {
     "title": "फ़ाइल को इस रूप में सहेजें",
@@ -1834,7 +1841,9 @@
       "scaleUnitImperial": "इंपीरियल (फुट / मील)",
       "scaleUnitNautical": "नॉटिकल (nmi)",
       "scaleUnitHint": "मानचित्र के नीचे स्केल बार पर दिखाई जाने वाली इकाइयाँ चुनें।",
-      "errorBoundsUnavailable": "मानचित्र सीमाएँ अभी उपलब्ध नहीं हैं।"
+      "errorBoundsUnavailable": "मानचित्र सीमाएँ अभी उपलब्ध नहीं हैं।",
+      "coordinateFormat": "निर्देशांक प्रारूप",
+      "coordinateFormatHint": "स्टेटस बार पॉइंटर निर्देशांक किस नोटेशन में दिखाता है। नोटेशन बदलने के लिए स्टेटस बार में निर्देशांक पर क्लिक करें।"
     },
     "layout": {
       "title": "लेआउट",
