@@ -194,6 +194,10 @@
     "computing": "جارٍ حساب التضاريس…",
     "partialData": "بعض العينات لا تتوفر لها بيانات تضاريس"
   },
+  "statusBar": {
+    "elevation": "ارتفاع",
+    "elevationLong": "الارتفاع"
+  },
   "fileNamePrompt": {
     "title": "حفظ الملف باسم",
     "description": "أدخل اسم الملف. سيُنزَّل الملف إلى مجلد التنزيلات في المتصفح لديك.",
@@ -2707,6 +2711,8 @@
       "atmosphereEnabled": "مفعّل",
       "spinGlobe": "دوران الكرة الأرضية",
       "graticule": "خطوط الشبكة",
+      "pointerElevation": "الارتفاع",
+      "pointerElevationHint": "إظهار ارتفاع الأرض تحت المؤشر في شريط الحالة. بدون تضاريس ثلاثية الأبعاد يستخدم خدمة ارتفاعات عامة.",
       "weather": "الطقس",
       "weatherTooltip": "تراكب طبقات طقس شبه آنية فوق الخريطة مع إمكانية تحريكها.",
       "weatherPlay": "تشغيل الحركة",
@@ -2835,7 +2841,9 @@
       "loadingOsmPbfDesc": "يجري تحليل الملف وتحويل المعالم إلى GeoJSON. يعمل ذلك في الخلفية وقد يستغرق بعض الوقت مع المقتطفات الكبيرة.",
       "loadingOsmPbfProgress": "جارٍ تحويل المعالم إلى GeoJSON… تمت معالجة {{processed}} من أصل {{total}} من كيانات OSM.",
       "projectName": "اسم المشروع",
-      "storymapEllipsis": "خريطة قصصية..."
+      "storymapEllipsis": "خريطة قصصية...",
+      "pointerElevationNoticeTitle": "الارتفاع يستخدم خدمة ارتفاعات عامة",
+      "pointerElevationNoticeDesc": "يُحسب الارتفاع من تضاريس الخريطة ثلاثية الأبعاد عند تفعيلها دون إرسال أي بيانات. وبدونها تُستخدم واجهة Open-Meteo العامة، فتغادر إحداثيات المؤشر جهازك."
     },
     "plugin": {
       "maplibre-gl-annotations": "التعليقات التوضيحية",

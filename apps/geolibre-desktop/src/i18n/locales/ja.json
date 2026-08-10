@@ -184,6 +184,10 @@
     "computing": "地形を計算しています…",
     "partialData": "一部のサンプルに地形データがありませんでした"
   },
+  "statusBar": {
+    "elevation": "標高",
+    "elevationLong": "標高"
+  },
   "fileNamePrompt": {
     "title": "名前を付けて保存",
     "description": "ファイル名を入力してください。ファイルはブラウザのダウンロードフォルダに保存されます。",
@@ -2483,6 +2487,8 @@
       "atmosphereEnabled": "有効",
       "spinGlobe": "地球儀を回転",
       "graticule": "グリッド線",
+      "pointerElevation": "標高",
+      "pointerElevationHint": "ステータスバーにポインター位置の地表標高を表示します。3D地形がない場合は公開標高サービスに問い合わせます。",
       "weather": "天気",
       "weatherTooltip": "アニメーション可能なほぼリアルタイムの気象レイヤーを重ねて表示します。",
       "weatherPlay": "アニメーションを再生",
@@ -2601,7 +2607,9 @@
       "loadingOsmPbfDesc": "ファイルを解析し、フィーチャを GeoJSON に変換しています。この処理はバックグラウンドで実行され、大きな抽出データの場合は少し時間がかかることがあります。",
       "loadingOsmPbfProgress": "フィーチャを GeoJSON に変換しています… {{total}} 件中 {{processed}} 件の OSM エンティティを処理済み。",
       "projectName": "プロジェクト名",
-      "storymapEllipsis": "ストーリーマップ..."
+      "storymapEllipsis": "ストーリーマップ...",
+      "pointerElevationNoticeTitle": "標高は公開サービスを利用します",
+      "pointerElevationNoticeDesc": "3D地形が有効な場合、標高は地図自体から求められ、何も送信されません。3D地形がない場合は公開のOpen-Meteo APIに問い合わせ、ポインター位置の座標が端末外に送信されます。"
     },
     "plugin": {
       "maplibre-gl-annotations": "注釈",

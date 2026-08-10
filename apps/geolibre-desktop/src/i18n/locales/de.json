@@ -186,6 +186,10 @@
     "computing": "Gelände wird berechnet…",
     "partialData": "Für einige Messpunkte lagen keine Geländedaten vor"
   },
+  "statusBar": {
+    "elevation": "Höhe",
+    "elevationLong": "Höhe"
+  },
   "fileNamePrompt": {
     "title": "Datei speichern unter",
     "description": "Geben Sie einen Dateinamen ein. Die Datei wird in den Downloads-Ordner Ihres Browsers heruntergeladen.",
@@ -2528,6 +2532,8 @@
       "atmosphereEnabled": "Aktiviert",
       "spinGlobe": "Rotierender Globus",
       "graticule": "Gitternetzlinien",
+      "pointerElevation": "Höhe",
+      "pointerElevationHint": "Geländehöhe unter dem Zeiger in der Statusleiste anzeigen. Ohne 3D-Gelände wird ein öffentlicher Höhendienst abgefragt.",
       "weather": "Wetter",
       "weatherTooltip": "Überlagern Sie animierbare Wetterebenen nahezu in Echtzeit.",
       "weatherPlay": "Animation abspielen",
@@ -2648,7 +2654,9 @@
       "loadingOsmPbfDesc": "Die Datei wird geparst und die Objekte werden in GeoJSON umgewandelt. Dies läuft im Hintergrund und kann bei großen Auszügen einen Moment dauern.",
       "loadingOsmPbfProgress": "Objekte werden in GeoJSON umgewandelt… {{processed}} von {{total}} OSM-Entitäten verarbeitet.",
       "projectName": "Projektname",
-      "storymapEllipsis": "Story Map..."
+      "storymapEllipsis": "Story Map...",
+      "pointerElevationNoticeTitle": "Höhe nutzt einen öffentlichen Höhendienst",
+      "pointerElevationNoticeDesc": "Die Höhenanzeige wird aus dem 3D-Gelände der Karte berechnet, wenn dieses aktiv ist – dabei werden keine Daten gesendet. Ohne 3D-Gelände wird die öffentliche Open-Meteo-API abgefragt, und die Koordinaten unter dem Zeiger verlassen Ihr Gerät."
     },
     "plugin": {
       "maplibre-gl-annotations": "Anmerkungen",

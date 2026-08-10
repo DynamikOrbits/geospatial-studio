@@ -186,6 +186,10 @@
     "computing": "Arazi hesaplanıyor…",
     "partialData": "Bazı örneklemlerde arazi verisi yoktu"
   },
+  "statusBar": {
+    "elevation": "Rakım",
+    "elevationLong": "Yükseklik"
+  },
   "fileNamePrompt": {
     "title": "Dosyayı farklı kaydet",
     "description": "Bir dosya adı girin. Dosya, tarayıcınızın indirilenler klasörüne indirilir.",
@@ -2528,6 +2532,8 @@
       "atmosphereEnabled": "Etkin",
       "spinGlobe": "Dönen Küre",
       "graticule": "Kılavuz Çizgileri",
+      "pointerElevation": "Rakım",
+      "pointerElevationHint": "Durum çubuğunda imlecin altındaki arazi rakımını göster. 3B arazi yokken genel bir rakım servisi sorgulanır.",
       "weather": "Hava durumu",
       "weatherTooltip": "Neredeyse gerçek zamanlı, canlandırılabilir hava durumu katmanlarını üst üste bindirin.",
       "weatherPlay": "Animasyonu oynat",
@@ -2648,7 +2654,9 @@
       "loadingOsmPbfDesc": "Dosya ayrıştırılıyor ve öğeler GeoJSON'a dönüştürülüyor. Bu arka planda çalışır; büyük dosyalar için biraz zaman alabilir.",
       "loadingOsmPbfProgress": "Öğeler GeoJSON'a dönüştürülüyor… {{total}} OSM varlığından {{processed}} tanesi işlendi.",
       "projectName": "Proje adı",
-      "storymapEllipsis": "Hikaye Haritası..."
+      "storymapEllipsis": "Hikaye Haritası...",
+      "pointerElevationNoticeTitle": "Rakım genel bir servis kullanır",
+      "pointerElevationNoticeDesc": "3B arazi açıkken rakım haritanın kendisinden hesaplanır ve hiçbir veri gönderilmez. 3B arazi yokken genel Open-Meteo API'si sorgulanır ve imlecin altındaki koordinatlar cihazınızdan çıkar."
     },
     "plugin": {
       "maplibre-gl-annotations": "Ek açıklamalar",

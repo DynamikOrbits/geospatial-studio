@@ -186,6 +186,10 @@
     "computing": "Terrein berekenen…",
     "partialData": "Sommige meetpunten hadden geen terreingegevens"
   },
+  "statusBar": {
+    "elevation": "Hoogte",
+    "elevationLong": "Hoogte"
+  },
   "fileNamePrompt": {
     "title": "Bestand opslaan als",
     "description": "Voer een bestandsnaam in. Het bestand wordt gedownload naar de downloadmap van uw browser.",
@@ -2528,6 +2532,8 @@
       "atmosphereEnabled": "Ingeschakeld",
       "spinGlobe": "Draaiende globe",
       "graticule": "Rasterlijnen",
+      "pointerElevation": "Hoogte",
+      "pointerElevationHint": "Toon de terreinhoogte onder de aanwijzer in de statusbalk. Zonder 3D-terrein wordt een openbare hoogtedienst geraadpleegd.",
       "weather": "Weer",
       "weatherTooltip": "Leg bijna realtime weerlagen over elkaar die je kunt animeren.",
       "weatherPlay": "Animatie afspelen",
@@ -2648,7 +2654,9 @@
       "loadingOsmPbfDesc": "Het bestand wordt verwerkt en de features worden geconverteerd naar GeoJSON. Dit gebeurt op de achtergrond en kan voor grote extracten even duren.",
       "loadingOsmPbfProgress": "Features converteren naar GeoJSON… {{processed}} van {{total}} OSM-entiteiten verwerkt.",
       "projectName": "Projectnaam",
-      "storymapEllipsis": "Story Map..."
+      "storymapEllipsis": "Story Map...",
+      "pointerElevationNoticeTitle": "Hoogte gebruikt een openbare dienst",
+      "pointerElevationNoticeDesc": "De hoogte wordt uit het 3D-terrein van de kaart bepaald als dat aanstaat; er wordt dan niets verzonden. Zonder 3D-terrein wordt de openbare Open-Meteo-API geraadpleegd en verlaten de coördinaten onder de aanwijzer uw apparaat."
     },
     "plugin": {
       "maplibre-gl-annotations": "Annotaties",

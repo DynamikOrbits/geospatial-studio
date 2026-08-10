@@ -186,6 +186,10 @@
     "computing": "Calculando terreno…",
     "partialData": "Algumas amostras não tinham dados de terreno"
   },
+  "statusBar": {
+    "elevation": "Elev",
+    "elevationLong": "Elevação"
+  },
   "fileNamePrompt": {
     "title": "Salvar arquivo como",
     "description": "Digite um nome de arquivo. O arquivo será baixado para a pasta de downloads do seu navegador.",
@@ -2528,6 +2532,8 @@
       "atmosphereEnabled": "Ativado",
       "spinGlobe": "Globo giratório",
       "graticule": "Linhas de grade",
+      "pointerElevation": "Elevação",
+      "pointerElevationHint": "Mostrar a elevação do terreno sob o ponteiro na barra de estado. Sem relevo 3D é consultado um serviço público de elevação.",
       "weather": "Clima",
       "weatherTooltip": "Sobreponha camadas de clima quase em tempo real que você pode animar.",
       "weatherPlay": "Reproduzir animação",
@@ -2648,7 +2654,9 @@
       "loadingOsmPbfDesc": "Analisando o arquivo e convertendo feições para GeoJSON. Isso é executado em segundo plano e pode levar um momento para extratos grandes.",
       "loadingOsmPbfProgress": "Convertendo feições para GeoJSON… {{processed}} de {{total}} entidades OSM processadas.",
       "projectName": "Nome do projeto",
-      "storymapEllipsis": "Story Map..."
+      "storymapEllipsis": "Story Map...",
+      "pointerElevationNoticeTitle": "A elevação usa um serviço público",
+      "pointerElevationNoticeDesc": "A elevação é obtida do relevo 3D do mapa quando este está ativo, sem enviar nada. Sem relevo 3D é consultada a API pública Open-Meteo e as coordenadas sob o ponteiro saem do seu dispositivo."
     },
     "plugin": {
       "maplibre-gl-annotations": "Anotações",

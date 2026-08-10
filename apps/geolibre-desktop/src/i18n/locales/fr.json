@@ -186,6 +186,10 @@
     "computing": "Calcul du terrain…",
     "partialData": "Certains échantillons n'avaient pas de données de terrain"
   },
+  "statusBar": {
+    "elevation": "Alt",
+    "elevationLong": "Altitude"
+  },
   "fileNamePrompt": {
     "title": "Enregistrer le fichier sous",
     "description": "Entrez un nom de fichier. Le fichier est téléchargé dans le dossier de téléchargements de votre navigateur.",
@@ -2528,6 +2532,8 @@
       "atmosphereEnabled": "Activé",
       "spinGlobe": "Globe rotatif",
       "graticule": "Quadrillage",
+      "pointerElevation": "Altitude",
+      "pointerElevationHint": "Afficher l'altitude du terrain sous le pointeur dans la barre d'état. Sans relief 3D, un service d'altitude public est interrogé.",
       "weather": "Météo",
       "weatherTooltip": "Superposez des couches météo en quasi-temps réel que vous pouvez animer.",
       "weatherPlay": "Lire l'animation",
@@ -2648,7 +2654,9 @@
       "loadingOsmPbfDesc": "Analyse du fichier et conversion des entités en GeoJSON. Cela s'exécute en arrière-plan et peut prendre un moment pour les grands extraits.",
       "loadingOsmPbfProgress": "Conversion des entités en GeoJSON… {{processed}} sur {{total}} entités OSM traitées.",
       "projectName": "Nom du projet",
-      "storymapEllipsis": "Story Map..."
+      "storymapEllipsis": "Story Map...",
+      "pointerElevationNoticeTitle": "L'altitude est obtenue d'un service public",
+      "pointerElevationNoticeDesc": "L'altitude est calculée à partir du relief 3D de la carte lorsqu'il est actif, sans rien envoyer. Sans relief 3D, l'API publique Open-Meteo est interrogée et les coordonnées sous le pointeur quittent votre appareil."
     },
     "plugin": {
       "maplibre-gl-annotations": "Annotations",

@@ -184,6 +184,10 @@
     "computing": "Menghitung medan…",
     "partialData": "Beberapa sampel tidak memiliki data medan"
   },
+  "statusBar": {
+    "elevation": "Elev",
+    "elevationLong": "Elevasi"
+  },
   "fileNamePrompt": {
     "title": "Simpan file sebagai",
     "description": "Masukkan nama file. File akan diunduh ke folder unduhan browser Anda.",
@@ -2483,6 +2487,8 @@
       "atmosphereEnabled": "Diaktifkan",
       "spinGlobe": "Bola Dunia Berputar",
       "graticule": "Garis Kisi",
+      "pointerElevation": "Elevasi",
+      "pointerElevationHint": "Tampilkan elevasi tanah di bawah penunjuk pada bilah status. Tanpa medan 3D, layanan elevasi publik akan dikueri.",
       "weather": "Cuaca",
       "weatherTooltip": "Tampilkan lapisan cuaca hampir real-time yang dapat dianimasikan.",
       "weatherPlay": "Putar animasi",
@@ -2601,7 +2607,9 @@
       "loadingOsmPbfDesc": "Menguraikan file dan mengonversi fitur ke GeoJSON. Ini berjalan di latar belakang dan mungkin memakan waktu untuk ekstrak besar.",
       "loadingOsmPbfProgress": "Mengonversi fitur ke GeoJSON… {{processed}} dari {{total}} entitas OSM diproses.",
       "projectName": "Nama proyek",
-      "storymapEllipsis": "Peta Cerita..."
+      "storymapEllipsis": "Peta Cerita...",
+      "pointerElevationNoticeTitle": "Elevasi memakai layanan publik",
+      "pointerElevationNoticeDesc": "Elevasi dihitung dari medan 3D peta bila aktif, tanpa mengirim apa pun. Tanpa medan 3D, API publik Open-Meteo dikueri dan koordinat di bawah penunjuk meninggalkan perangkat Anda."
     },
     "plugin": {
       "maplibre-gl-annotations": "Anotasi",
