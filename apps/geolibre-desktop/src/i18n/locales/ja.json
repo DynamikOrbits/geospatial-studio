@@ -5126,7 +5126,8 @@
     "noValues": "これらのピクセルにはグラフ化できる値がありません。",
     "exportPng": "PNG",
     "exportCsv": "CSV",
-    "exportError": "グラフをエクスポートできませんでした。"
+    "exportError": "グラフをエクスポートできませんでした。",
+    "rasterFallbackName": "ラスター"
   },
   "netcdfIdentify": {
     "noData": "データなし",

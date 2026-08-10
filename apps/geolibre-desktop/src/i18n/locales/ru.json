@@ -5348,7 +5348,8 @@
     "noValues": "Для этих пикселей нет значений для графика.",
     "exportPng": "PNG",
     "exportCsv": "CSV",
-    "exportError": "Не удалось экспортировать график."
+    "exportError": "Не удалось экспортировать график.",
+    "rasterFallbackName": "Растр"
   },
   "netcdfIdentify": {
     "noData": "нет данных",
