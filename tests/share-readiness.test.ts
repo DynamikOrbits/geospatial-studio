@@ -45,6 +45,23 @@ function fakeFetch(routes: Record<string, number | Error>) {
   return { fn, calls };
 }
 
+/**
+ * Answers HEAD with `headStatus` and rejects the ranged GET, recording both
+ * attempts so a test can prove the retry actually ran.
+ */
+function rejectingRangedGet(headStatus: number) {
+  const attempts: { method?: string; range?: string }[] = [];
+  const fn = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    attempts.push({
+      method: init?.method,
+      range: (init?.headers as Record<string, string> | undefined)?.Range,
+    });
+    if (init?.method === "HEAD") return new Response(null, { status: headStatus });
+    throw new TypeError("Failed to fetch");
+  }) as unknown as typeof fetch;
+  return { fn, attempts };
+}
+
 describe("isPrivateHostname", () => {
   it("recognizes loopback, private ranges, and reserved suffixes", () => {
     for (const host of [
@@ -194,6 +211,23 @@ describe("collectShareSources", () => {
     assert.equal(refs[0].probeUrl, "https://tiles.example.com/tileset.json");
   });
 
+  it("skips a deck.gl visualization whose rows are inlined as an array", () => {
+    const refs = collectShareSources({
+      layers: [
+        layer({
+          id: "a",
+          name: "Arcs from CSV",
+          type: "deckgl-viz",
+          source: { type: "deckgl-viz", data: [{ lat: 1, lon: 2 }] },
+          // Set when the layer is built from a local file, and not a reference
+          // a recipient needs: the rows travel in `source.data`.
+          sourcePath: "/home/me/flows.csv",
+        }),
+      ],
+    });
+    assert.deepEqual(refs, []);
+  });
+
   it("reports a query-backed layer that names no reference at all", () => {
     const refs = collectShareSources({
       layers: [
@@ -326,6 +360,42 @@ describe("probeShareSources", () => {
     assert.equal(probed[0].status, "reachable");
     // The range matters as much as the method: without it, every HEAD-refusing
     // host would have its whole object downloaded by the readiness check.
+    assert.deepEqual(attempts, [
+      { method: "HEAD", range: undefined },
+      { method: "GET", range: "bytes=0-0" },
+    ]);
+  });
+
+  it("falls back to the HEAD verdict when only the ranged GET is rejected", async () => {
+    const refs = collectShareSources({
+      layers: [
+        layer({ id: "a", name: "A", type: "cog", source: { url: "https://s3.example.com/a.tif" } }),
+      ],
+    });
+    // HEAD answers 405, so the host is up and readable cross-origin; the ranged
+    // GET is rejected on its own (an older webview preflighting `Range`). That
+    // must not turn a working host into a "blocked" verdict.
+    const { fn, attempts } = rejectingRangedGet(405);
+    const { refs: probed } = await probeShareSources(refs, { fetchImpl: fn });
+    assert.equal(probed[0].status, "reachable");
+    // Without this the test would still pass if the retry were dropped
+    // entirely, since a bare HEAD 405 also reads as reachable.
+    assert.deepEqual(attempts, [
+      { method: "HEAD", range: undefined },
+      { method: "GET", range: "bytes=0-0" },
+    ]);
+  });
+
+  it("keeps a HEAD 403 credentialed when the ranged GET is also rejected", async () => {
+    const refs = collectShareSources({
+      layers: [
+        layer({ id: "a", name: "A", type: "cog", source: { url: "https://s3.example.com/a.tif" } }),
+      ],
+    });
+    const { fn, attempts } = rejectingRangedGet(403);
+    const { refs: probed } = await probeShareSources(refs, { fetchImpl: fn });
+    assert.equal(probed[0].status, "credentialed");
+    assert.equal(probed[0].reason, "auth-required");
     assert.deepEqual(attempts, [
       { method: "HEAD", range: undefined },
       { method: "GET", range: "bytes=0-0" },
