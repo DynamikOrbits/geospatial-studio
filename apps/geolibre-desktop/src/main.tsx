@@ -55,6 +55,7 @@ import i18n, { i18nReady } from "./i18n";
 import { installDiagnosticsCapture } from "./lib/diagnostics";
 import { isTauri } from "./lib/is-tauri";
 import { installStaleChunkReload } from "./lib/stale-chunk-reload";
+import { resolveClerkPublishableKey, resolveClerkWaitlistEnabled } from "./lib/clerk-auth";
 
 installDiagnosticsCapture();
 // In the desktop build, route geocoding (place search / reverse geocode)
@@ -95,6 +96,14 @@ if (isTauri()) {
 // Recover from chunks orphaned by a web redeploy (stale lazy import → 404). A
 // no-op in the desktop build, whose chunks are bundled locally.
 installStaleChunkReload();
+// "Web app" here means the *build*, never anything the visitor controls: the
+// desktop shell and the Jupyter embed wheel are compiled without the gate, but a
+// hosted deployment gates every request. In particular this must NOT consult
+// `isEmbedded()` — that returns true for a plain `?embed=1` query parameter, so
+// any visitor could disable a configured sign-in wall by typing a URL.
+const isHostedWebApp = !isTauri() && !__GEOLIBRE_EMBED_BUILD__;
+const clerkPublishableKey = resolveClerkPublishableKey(isHostedWebApp);
+const clerkWaitlistEnabled = resolveClerkWaitlistEnabled(isHostedWebApp);
 // Register the offline/PWA service worker (web build only). `registerSW` is a
 // no-op stub in the Tauri desktop and embedded Jupyter builds, where the plugin
 // is disabled (see vite.config.ts pwaPlugin).
@@ -138,18 +147,26 @@ registerSW({
 void Promise.all([
   import("./App"),
   import("./components/common/error-boundaries"),
+  clerkPublishableKey ? import("./components/auth/ClerkGate") : Promise.resolve(null),
   // Gate the first render on i18next being initialized with the active locale's
   // (lazily loaded) catalog, so the UI never paints raw translation keys.
   i18nReady,
 ])
-  .then(([{ default: App }, { AppErrorBoundary }]) => {
+  .then(([{ default: App }, { AppErrorBoundary }, clerkModule]) => {
+    const app = <App />;
+    const authenticatedApp =
+      clerkPublishableKey && clerkModule ? (
+        <clerkModule.ClerkGate publishableKey={clerkPublishableKey} waitlist={clerkWaitlistEnabled}>
+          {app}
+        </clerkModule.ClerkGate>
+      ) : (
+        app
+      );
     ReactDOM.createRoot(document.getElementById("root")!).render(
       <React.StrictMode>
         <I18nextProvider i18n={i18n}>
           <AppErrorBoundary>
-            <TooltipProvider delayDuration={200}>
-              <App />
-            </TooltipProvider>
+            <TooltipProvider delayDuration={200}>{authenticatedApp}</TooltipProvider>
           </AppErrorBoundary>
         </I18nextProvider>
       </React.StrictMode>,
