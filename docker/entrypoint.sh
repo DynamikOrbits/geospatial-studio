@@ -217,11 +217,14 @@ if origins:
 def service_url(name, value, schemes, loopback_schemes, loopback_hosts):
     """Validate a self-hosted service URL, or exit with an explanation.
 
-    Both of these carry a Bearer token, so a plaintext scheme is only allowed on
-    loopback (development). The app applies the same rule and *refuses* a value it
-    rejects rather than falling back to the public hosted service — so a value
-    that reaches the app unvalidated becomes a silently disabled feature. Failing
-    the boot instead puts the error where an operator will actually see it.
+    Every caller sends a credential to the value it is given -- the share and
+    collab URLs carry a Bearer token, and a news proxy fronting a Tavily key is
+    only worth pointing at over TLS whatever it asks for -- so a plaintext scheme
+    is only allowed on loopback (development). The app applies the same rule and
+    *refuses* a value it rejects rather than falling back to the public hosted
+    service — so a value that reaches the app unvalidated becomes a silently
+    disabled feature. Failing the boot instead puts the error where an operator
+    will actually see it.
     """
     parsed = urlsplit(value)
     # Both checks below run before the loopback shortcut, so their guarantees hold
@@ -258,6 +261,50 @@ def service_url(name, value, schemes, loopback_schemes, loopback_hosts):
             f"(or {loopback_schemes[0]}:// on {allowed_hosts}), not {value!r}."
         )
     return value
+
+
+# The externally loaded NASA OPERA plugin can share the authenticated /ai route
+# when the managed Worker exposes /tavily. Operators using a separate news
+# Worker can override this with its public HTTPS URL. Only the endpoint reaches
+# the browser; the Tavily key remains a Worker secret.
+#
+# Either way the published value is the proxy *base* the plugin appends its own
+# /tavily path to, which is why the same-origin fallback is "/ai" and not
+# "/ai/tavily". That fallback needs no service_url() check: the shell block above
+# already pins GEOLIBRE_AI_URL to exactly "/ai" and exits otherwise, and
+# service_url() would in fact reject a bare path, having no scheme or netloc.
+news_url = os.environ.get("GEOLIBRE_NASA_OPERA_NEWS_PROXY_ENDPOINT", "").strip()
+if news_url:
+    # rstrip the trailing slash the way GEOLIBRE_AI_PROXY_URL is handled above. A
+    # base ending in "/" would become ".../tavily" with a doubled slash under a
+    # plain string join, and the plugin doing that join is out of this repo, so
+    # this is the only place that can rule it out. Stripping before service_url()
+    # keeps a slashes-only value an error rather than silently unsetting it.
+    news_endpoint = service_url(
+        "GEOLIBRE_NASA_OPERA_NEWS_PROXY_ENDPOINT",
+        news_url.rstrip("/"),
+        ("https",),
+        ("http",),
+        ("localhost", "127.0.0.1", "::1"),
+    )
+elif os.environ.get("GEOLIBRE_AI_URL"):
+    news_endpoint = os.environ["GEOLIBRE_AI_URL"]
+else:
+    news_endpoint = ""
+if news_endpoint:
+    # Three spellings of one value, because the reader is a plugin loaded from
+    # outside this repo and the app itself never reads any of them. No apostrophes
+    # below: this whole program is one single-quoted `python -c` argument, and a
+    # literal apostrophe in a comment ends it just as surely as one in code (see
+    # the allowed_hosts note in service_url above).
+    #   - the bare key is the contract name owned by the plugin;
+    #   - VITE_NASA_OPERA_… is the plugin-owned build-env spelling, which drops the
+    #     GEOLIBRE_ segment because the variable belongs to the plugin, not here;
+    #   - VITE_GEOLIBRE_NASA_OPERA_… is the VITE_GEOLIBRE_<NAME> alias every other
+    #     entry in this dict uses, readable through readDeploymentEnvValue().
+    deployment["GEOLIBRE_NASA_OPERA_NEWS_PROXY_ENDPOINT"] = news_endpoint
+    deployment["VITE_NASA_OPERA_NEWS_PROXY_ENDPOINT"] = news_endpoint
+    deployment["VITE_GEOLIBRE_NASA_OPERA_NEWS_PROXY_ENDPOINT"] = news_endpoint
 
 
 # Project sharing server. Unset means the public hosted service; "off" removes
@@ -303,6 +350,15 @@ fi
 
 if [ -n "$(trim "${GEOLIBRE_COLLAB_URL:-}")" ]; then
   echo "Collaboration relay: $(trim "$GEOLIBRE_COLLAB_URL")"
+fi
+
+if [ -n "$(trim "${GEOLIBRE_NASA_OPERA_NEWS_PROXY_ENDPOINT:-}")" ]; then
+  echo "NASA OPERA news proxy: $(trim "$GEOLIBRE_NASA_OPERA_NEWS_PROXY_ENDPOINT")"
+elif [ -n "${GEOLIBRE_AI_URL:-}" ]; then
+  # "routed through", not "enabled": whether search actually works depends on the
+  # Worker holding TAVILY_API_KEY, which this container has no way to see. Without
+  # it the route answers 503 to every request.
+  echo "NASA OPERA news search routed through $GEOLIBRE_AI_URL (requires TAVILY_API_KEY on the Worker)."
 fi
 
 if [ -n "${GEOLIBRE_EMBED_ORIGINS:-}" ]; then
