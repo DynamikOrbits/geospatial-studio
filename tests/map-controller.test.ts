@@ -1632,11 +1632,14 @@ describe("MapController Mapbox descriptor requests", () => {
   const OPENFREEMAP = "https://tiles.openfreemap.org/styles/liberty";
 
   /** Minimal map stub: setStyle/remove are all the Mapbox path touches. */
-  function mapboxController(): { controller: MapController; styles: unknown[] } {
-    const styles: unknown[] = [];
+  function mapboxController(): {
+    controller: MapController;
+    styles: Array<{ style: unknown; options: unknown }>;
+  } {
+    const styles: Array<{ style: unknown; options: unknown }> = [];
     const map = {
-      setStyle: (style: unknown) => {
-        styles.push(style);
+      setStyle: (style: unknown, options?: unknown) => {
+        styles.push({ style, options });
       },
       remove: () => {},
       addControl: () => {},
@@ -1705,6 +1708,26 @@ describe("MapController Mapbox descriptor requests", () => {
     });
   });
 
+  it("disables validation and diffing for a loaded Mapbox descriptor", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ version: 8, sources: {}, layers: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof globalThis.fetch;
+    const { controller, styles } = mapboxController();
+    try {
+      controller.setStyle(MAPBOX_STREETS);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      assert.equal(styles.length, 1);
+      assert.deepEqual(styles[0]?.options, { diff: false, validate: false });
+    } finally {
+      globalThis.fetch = originalFetch;
+      controller.destroy();
+    }
+  });
+
   it("aborts a pending descriptor request when a non-Mapbox style is applied", async () => {
     await withPendingFetch((signals) => {
       const { controller, styles } = mapboxController();
@@ -1713,7 +1736,7 @@ describe("MapController Mapbox descriptor requests", () => {
         controller.setStyle(OPENFREEMAP);
 
         // The plain URL resolves synchronously, and no second fetch is made.
-        assert.deepEqual(styles, [OPENFREEMAP]);
+        assert.deepEqual(styles, [{ style: OPENFREEMAP, options: { diff: false } }]);
         assert.equal(signals.length, 1);
         assert.equal(signals[0]?.aborted, true);
       } finally {
