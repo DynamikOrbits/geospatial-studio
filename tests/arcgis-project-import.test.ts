@@ -213,8 +213,99 @@ describe("ArcGIS Pro project import", () => {
       result.warnings.map((warning) => [warning.layerName, warning.reason]),
       [
         ["Hosted", "service"],
-        ["Parcels", "format"],
+        // Distinct from a plain "format" so a .gdb-backed project, where every
+        // layer fails this way, says which format that was (GeoLibre#1904).
+        ["Parcels", "file-geodatabase"],
         ["Labels", "layer-type"],
+      ],
+    );
+  });
+
+  it("reports a geodatabase raster as a geodatabase, not a bad format", () => {
+    const mapx = {
+      type: "CIMMap",
+      name: "Elevation",
+      defaultExtent: { xmin: -80, ymin: 30, xmax: -70, ymax: 40, spatialReference: { wkid: 4326 } },
+      layerDefinitions: [
+        {
+          type: "CIMRasterLayer",
+          name: "DEM",
+          dataConnection: {
+            workspaceFactory: "FileGDB",
+            workspaceConnectionString: "DATABASE=C:\\data\\terrain.gdb",
+            dataset: "dem",
+          },
+        },
+      ],
+    };
+    const result = importArcgisProject(JSON.stringify(mapx), "C:\\projects\\main.mapx");
+    assert.deepEqual(
+      result.warnings.map((warning) => [warning.layerName, warning.reason]),
+      // Its own reason, not the feature-class one: the desktop File
+      // Geodatabase source that reason points at lists only feature classes
+      // with geometry, so a raster must not be sent there.
+      [["DEM", "file-geodatabase-raster"]],
+    );
+  });
+
+  it("reports a geodatabase raster with no dataset name as a geodatabase", () => {
+    // The geodatabase check deliberately precedes the missing-dataset guard,
+    // so this matches what the vector resolver already did for the same
+    // connection. "It is a geodatabase" is the actionable half; the absent
+    // dataset name would not change what the user has to do.
+    const mapx = {
+      type: "CIMMap",
+      name: "Elevation",
+      defaultExtent: { xmin: -80, ymin: 30, xmax: -70, ymax: 40, spatialReference: { wkid: 4326 } },
+      layerDefinitions: [
+        {
+          type: "CIMRasterLayer",
+          name: "DEM",
+          dataConnection: { workspaceConnectionString: "DATABASE=C:\\data\\terrain.gdb" },
+        },
+      ],
+    };
+    const result = importArcgisProject(JSON.stringify(mapx), "C:\\projects\\main.mapx");
+    assert.deepEqual(
+      result.warnings.map((warning) => [warning.layerName, warning.reason]),
+      [["DEM", "file-geodatabase-raster"]],
+    );
+  });
+
+  it("recognizes a geodatabase by its workspace path when no factory names one", () => {
+    // Not every connection reports a workspaceFactory, so a .gdb workspace has
+    // to be enough on its own -- otherwise these fall back to a bare "format"
+    // and the user is told nothing about which format that was.
+    const mapx = {
+      type: "CIMMap",
+      name: "Survey",
+      defaultExtent: { xmin: -80, ymin: 30, xmax: -70, ymax: 40, spatialReference: { wkid: 4326 } },
+      layerDefinitions: [
+        {
+          ...featureLayer("Parcels", ""),
+          featureTable: {
+            dataConnection: {
+              workspaceConnectionString: "DATABASE=C:\\data\\city.gdb",
+              dataset: "parcels",
+            },
+          },
+        },
+        {
+          type: "CIMRasterLayer",
+          name: "DEM",
+          dataConnection: {
+            workspaceConnectionString: "DATABASE=C:\\data\\city.gdb",
+            dataset: "dem",
+          },
+        },
+      ],
+    };
+    const result = importArcgisProject(JSON.stringify(mapx), "C:\\projects\\main.mapx");
+    assert.deepEqual(
+      result.warnings.map((warning) => [warning.layerName, warning.reason]),
+      [
+        ["Parcels", "file-geodatabase"],
+        ["DEM", "file-geodatabase-raster"],
       ],
     );
   });
