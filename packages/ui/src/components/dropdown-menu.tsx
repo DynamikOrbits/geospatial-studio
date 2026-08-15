@@ -37,6 +37,22 @@ export const DropdownMenuSubTrigger = React.forwardRef<
 ));
 DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
 
+/**
+ * Horizontal room a submenu may occupy: the space Radix's `size` middleware
+ * measured for the side it settled on, never more than the viewport less an 8px
+ * edge buffer, never less than zero.
+ *
+ * The `max(0px, …)` is not decoration. Floating UI's `availableWidth` goes
+ * negative when the floating element cannot fit its clipping context at all,
+ * and CSS clamps a math function to a property's allowed range rather than
+ * rejecting it, so a raw negative would silently resolve `max-width` to 0 and
+ * collapse the menu. Clamping here keeps the value a real length, and lets
+ * `minWidth` be derived from the same expression so the floor is provably never
+ * above the cap (they meet, at worst, at 0).
+ */
+const SUB_CONTENT_AVAILABLE_WIDTH =
+  "max(0px, min(var(--radix-dropdown-menu-content-available-width, 100vw), calc(100vw - 1rem)))";
+
 export const DropdownMenuSubContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
@@ -50,7 +66,9 @@ export const DropdownMenuSubContent = React.forwardRef<
     <DropdownMenuPrimitive.SubContent
       ref={ref}
       className={cn(
-        "z-50 max-w-[calc(100vw-1rem)] min-w-[8rem] overflow-x-hidden overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-lg",
+        // No min-w-[8rem] here, unlike DropdownMenuContent: the floor is set
+        // below so it can yield to the available-width cap on a narrow screen.
+        "z-50 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-lg",
         className,
       )}
       style={{
@@ -61,6 +79,27 @@ export const DropdownMenuSubContent = React.forwardRef<
         // dvh == vh and the insets are 0, so behavior is unchanged.
         maxHeight:
           "min(var(--radix-dropdown-menu-content-available-height, 100dvh), calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1rem))",
+        // The horizontal equivalent, and the only thing keeping a submenu on a
+        // narrow screen. Radix configures Floating UI's shift middleware as
+        // `shift({ mainAxis: true, crossAxis: false })`, and for a right/left
+        // placement the cross axis is the horizontal one — so a submenu that
+        // overflows sideways is never pushed back into view. `flip` picks the
+        // side with less overflow, but on a phone neither side fits: with a
+        // 390px viewport, a 161px parent at x=116 leaves 113px to its right and
+        // 116px to its left for a 185px submenu, so Radix flips left and lands
+        // at x=-64, a quarter of the menu off-screen (GeoLibre#1904 follow-up).
+        // Capping to the space Radix itself measured for the chosen side makes
+        // the submenu shrink to fit instead of overflowing; labels wrap. On
+        // desktop the available width always exceeds the content, so the cap is
+        // inert and nothing changes.
+        maxWidth: SUB_CONTENT_AVAILABLE_WIDTH,
+        // The usual 8rem floor, but it has to lose to the cap above or it just
+        // reintroduces the overflow a few pixels smaller: on a 390px viewport
+        // the submenu lands at x=264 with 126px to spare, and a hard 128px floor
+        // pushes it 2px past the edge. min() lets the floor collapse exactly as
+        // far as the available space demands and no further. Built from the same
+        // expression as maxWidth so the floor can never exceed the cap.
+        minWidth: `min(8rem, ${SUB_CONTENT_AVAILABLE_WIDTH})`,
         ...style,
       }}
       {...props}
