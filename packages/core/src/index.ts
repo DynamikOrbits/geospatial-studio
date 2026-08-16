@@ -139,3 +139,9 @@ export {
   type CredentialRedactionResult,
 } from "./credentials";
 export { excludeHiddenFieldsFromGeojson, excludeHiddenFieldsFromProject } from "./visibility";
+export * from "./editor-tracking";
+export {
+  currentEditorIdentity,
+  readStoredAuthorName,
+  setStoredAuthorName,
+} from "./editor-identity";
