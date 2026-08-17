@@ -5,6 +5,7 @@ import type { GeoJSONSource, MapMouseEvent, Map as MapLibreMap } from "maplibre-
 import type { GeoLibreAppAPI, GeoLibreCogLayerOptions, GeoLibrePlugin } from "../types";
 import { addPMTilesAsset } from "./stac-layers";
 import {
+  assetDisplayFormat,
   assetFormat,
   connectStac,
   horizontalBbox,
@@ -143,6 +144,12 @@ export interface StacLabels {
   addFailed: string;
   addNoSourceLayers: string;
   cogUnsupported: string;
+  formatCog: string;
+  formatGeoJson: string;
+  formatPmtiles: string;
+  formatParquet: string;
+  formatUnknown: string;
+  notAddable: string;
   showing: (count: number) => string;
   showingOfMatched: (count: number, matched: number) => string;
   adding: (asset: string) => string;
@@ -216,6 +223,12 @@ let labels: StacLabels = {
   addFailed: "Could not add asset",
   addNoSourceLayers: "This archive lists no layers to draw",
   cogUnsupported: "This GeoLibre host cannot visualize remote GeoTIFF assets",
+  formatCog: "COG",
+  formatGeoJson: "GeoJSON",
+  formatPmtiles: "PMTiles",
+  formatParquet: "Parquet",
+  formatUnknown: "Unknown format",
+  notAddable: "not addable",
   showing: (count) => `Showing ${count} items.`,
   showingOfMatched: (count, matched) => `Showing ${count} of ${matched} items.`,
   adding: (asset) => `Adding ${asset}…`,
@@ -352,7 +365,11 @@ function showDrawBox(map: MapLibreMap, bbox: [number, number, number, number]): 
     id: DRAW_LINE,
     type: "line",
     source: DRAW_SOURCE,
-    paint: { "line-color": "#f59e0b", "line-width": 2, "line-dasharray": [2, 1] },
+    paint: {
+      "line-color": "#f59e0b",
+      "line-width": 2,
+      "line-dasharray": [2, 1],
+    },
   });
 }
 
@@ -499,6 +516,26 @@ function footprintStyleLayers(map: MapLibreMap): string[] {
 
 function assetLabel(key: string, asset: StacAsset): string {
   return asset.title || key;
+}
+
+function assetFormatLabel(asset: StacAsset): string {
+  switch (assetDisplayFormat(asset)) {
+    case "cog":
+      return labels.formatCog;
+    case "geojson":
+      return labels.formatGeoJson;
+    case "pmtiles":
+      return labels.formatPmtiles;
+    case "parquet":
+      return labels.formatParquet;
+    case null:
+      return labels.formatUnknown;
+  }
+}
+
+function assetOptionLabel(key: string, asset: StacAsset): string {
+  const addability = isVisualizableAsset(asset) ? "" : ` (${labels.notAddable})`;
+  return `${assetLabel(key, asset)} — ${assetFormatLabel(asset)}${addability}`;
 }
 
 async function visualizeAsset(
@@ -822,7 +859,7 @@ function buildPanel(container: HTMLElement): () => void {
         const assetSelect = el("select");
         assetSelect.style.cssText = `${style.input}flex:1 1 140px;width:auto;`;
         for (const [key, asset] of assets) {
-          const option = el("option", assetLabel(key, asset));
+          const option = el("option", assetOptionLabel(key, asset));
           option.value = key;
           assetSelect.append(option);
         }
