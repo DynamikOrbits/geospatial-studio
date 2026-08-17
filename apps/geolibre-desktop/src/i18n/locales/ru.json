@@ -3530,8 +3530,9 @@
     "download": "Скачать",
     "adding": "Добавление {{asset}}…",
     "added": "{{asset}} добавлен на карту.",
-    "addUnsupported": "На карту можно добавить только ресурсы GeoTIFF/COG и GeoJSON",
+    "addUnsupported": "На карту можно добавить только ресурсы GeoTIFF/COG, GeoJSON и PMTiles",
     "addFailed": "Не удалось добавить ресурс",
+    "addNoSourceLayers": "В этом архиве нет слоёв для отрисовки",
     "cogUnsupported": "Этот хост GeoLibre не может отображать удалённые ресурсы GeoTIFF"
   },
   "earthdataGis": {
