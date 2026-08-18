@@ -186,7 +186,8 @@
     "computing": "Arazi hesaplanıyor…",
     "partialData": "Bazı örneklemlerde arazi verisi yoktu",
     "heading": "Yön",
-    "finalHeading": "Son yön"
+    "finalHeading": "Son yön",
+    "bodyNote": "Ölçüldü: {{body}} (küresel yaklaşım)"
   },
   "statusBar": {
     "elevation": "Rakım",
