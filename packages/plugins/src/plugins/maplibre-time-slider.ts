@@ -53,13 +53,17 @@ export { STORE_LAYER_SOURCE_KIND as TIME_SLIDER_SOURCE_KIND };
  * range out of the box rather than against an unrelated span (which would
  * request tiles for years the data does not cover).
  */
-function buildDefaultOptions(): TimeSliderOptions {
+export function buildDefaultOptions(): TimeSliderOptions {
   return {
     startDate: "1984-01-01",
     endDate: "2013-01-01",
     granularity: "year",
     granularities: ["year", "month", "day"],
     speed: 800,
+    // A bound cumulative layer is commonly used as a build-up animation. Stop
+    // on its final (complete) frame by default instead of immediately wrapping
+    // to the beginning and making the layer look incomplete.
+    loop: false,
     collapsible: true,
     collapsed: false,
     // Match the in-app light/dark toggle rather than the system
@@ -486,6 +490,20 @@ interface BoundLayer {
   binding: TimeBinding;
 }
 
+/** Restart a non-looping bound timeline when Play is pressed at its endpoint. */
+export function restartBoundPlaybackAtEnd(
+  control: Pick<TimeSliderControl, "getConfig" | "goTo">,
+  hasBoundLayers: boolean,
+): boolean {
+  if (!hasBoundLayers) return false;
+  const config = control.getConfig();
+  const currentMs = Date.parse(config.currentDate);
+  const endMs = Date.parse(config.endDate ?? "");
+  if (!Number.isFinite(currentMs) || !Number.isFinite(endMs) || currentMs < endMs) return false;
+  control.goTo(new Date(config.startDate));
+  return true;
+}
+
 /**
  * A layer whose time is an internal dimension (a Zarr data cube's `time` axis,
  * or a plugin's own custom layer), driven through the temporal-adapter registry
@@ -840,7 +858,11 @@ function attachBindingSync(control: TimeSliderControl): () => void {
     applyBoundFilters(control, getBoundLayers());
     applyTimeOverlayVisibility(control, getTimeOverlayFrames());
   };
+  const onPlay = () => {
+    restartBoundPlaybackAtEnd(control, getBoundLayers().length > 0);
+  };
   control.on("statechange", onStateChange);
+  control.on("play", onPlay);
   // An adapter can register after its binding is restored (a cube's renderer
   // loads asynchronously), and that never touches the store, so the registry is
   // watched separately from it.
@@ -868,6 +890,7 @@ function attachBindingSync(control: TimeSliderControl): () => void {
   reconcileBoundLayers(control);
 
   return () => {
+    control.off("play", onPlay);
     control.off("statechange", onStateChange);
     unsubscribeTemporal();
     if (selectorApplyTimer !== null) {

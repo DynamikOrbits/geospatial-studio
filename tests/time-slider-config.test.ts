@@ -3,11 +3,13 @@ import { afterEach, describe, it } from "node:test";
 import { DEFAULT_LAYER_STYLE, useAppStore, type GeoLibreLayer } from "@geolibre/core";
 import {
   __reconcileBoundLayersForTests,
+  buildDefaultOptions,
   configToOptions,
   getLayerTimeBinding,
   createStoreLayer,
   isTimeSliderIdle,
   maplibreTimeSliderPlugin,
+  restartBoundPlaybackAtEnd,
 } from "../packages/plugins/src/plugins/maplibre-time-slider";
 import { registerTemporalLayer } from "../packages/plugins/src/plugins/temporal-layers";
 import type { SourceSpec, TimeSliderControl } from "maplibre-gl-time-slider";
@@ -38,6 +40,30 @@ function baseConfig(overrides: Record<string, unknown> = {}): Record<string, unk
 // null state simply resets savedConfig to null).
 afterEach(() => {
   apply(null);
+});
+
+describe("Time Slider playback defaults", () => {
+  it("stops at the final frame instead of wrapping to the beginning", () => {
+    assert.equal(buildDefaultOptions().loop, false);
+  });
+
+  it("restarts a bound timeline when Play is pressed at the endpoint", () => {
+    let destination: Date | null = null;
+    const control = {
+      getConfig: () =>
+        baseConfig({
+          startDate: "1719-01-01T00:00:00.000Z",
+          endDate: "2026-01-01T00:00:00.000Z",
+          currentDate: "2026-01-01T00:00:00.000Z",
+        }),
+      goTo: (date: Date) => {
+        destination = date;
+      },
+    } as unknown as Pick<TimeSliderControl, "getConfig" | "goTo">;
+
+    assert.equal(restartBoundPlaybackAtEnd(control, true), true);
+    assert.equal((destination as Date | null)?.toISOString(), "1719-01-01T00:00:00.000Z");
+  });
 });
 
 describe("Time Slider open-ended end date persistence", () => {
