@@ -4,6 +4,7 @@ import {
   useAppStore,
   type GeoLibreLayer,
   type ModelGraphNode,
+  type ModelGraphNodeKind,
   type ProcessingModel,
   type ProcessingModelGraph,
 } from "@geolibre/core";
@@ -156,33 +157,62 @@ function createId(): string {
     : `id-${Math.random().toString(36).slice(2)}`;
 }
 
-/** Where a port's connector dot sits, in canvas coordinates. */
-/** Vertical room the provider line and the tool name take on a card. */
-const CARD_HEADER_HEIGHT = 36;
+/**
+ * Vertical room the provider line and the tool name take on a card. Measured
+ * against the rendered header (a 10px uppercase line over a 12px title, inside
+ * the card's 8px padding), so the first port row starts below it rather than
+ * on top of the name.
+ */
+const CARD_HEADER_HEIGHT = 40;
 /** Height of one labelled port row. */
 const PORT_ROW_HEIGHT = 18;
 
 /**
  * Card geometry for one node.
  *
- * A side carrying more than one port gets a labelled row per port: two bare
- * dots on the edge of a card are indistinguishable, so a tool like Raster
- * Streams To Vector gave no way to tell its `d8_pntr` input from its `streams`
- * one without hovering each in turn. Cards grow to fit those rows; a
- * single-port side keeps the compact card and centres its dot as before.
+ * Every input port on a *tool* is labelled, including a lone one: a bare dot
+ * says a connection goes here but not what belongs on it, so a single-input
+ * tool left the user guessing what it wanted just as a multi-input one left
+ * them guessing which dot was which. Cards grow to fit the rows when they need
+ * to; one input row still fits the compact card.
+ *
+ * The synthetic `input` and `output` nodes are excluded: their single port
+ * carries the node's own kind as its name, so labelling it would print
+ * "Output" under a card already headed OUTPUT. Output ports are labelled only
+ * when a tool has several, since one result port needs no telling apart.
  */
-function cardLayout(ports: {
-  inputs: { id: string; label: string }[];
-  outputs: { id: string; label: string }[];
-}): { height: number; labelIn: boolean; labelOut: boolean } {
-  const labelIn = ports.inputs.length > 1;
+function cardLayout(
+  ports: {
+    inputs: { id: string; label: string }[];
+    outputs: { id: string; label: string }[];
+  },
+  kind: ModelGraphNodeKind,
+): { height: number; labelIn: boolean; labelOut: boolean; band: PortBand } {
+  const labelIn = kind === "tool" && ports.inputs.length > 0;
   const labelOut = ports.outputs.length > 1;
   const rows = Math.max(ports.inputs.length, ports.outputs.length);
+  // A labelled card is always a little taller than a bare one: at the compact
+  // height a single row's text sits hard against the title above and the card
+  // edge below.
   const height =
     labelIn || labelOut
-      ? Math.max(NODE_HEIGHT, CARD_HEADER_HEIGHT + rows * PORT_ROW_HEIGHT + 6)
+      ? Math.max(NODE_HEIGHT + 6, CARD_HEADER_HEIGHT + rows * PORT_ROW_HEIGHT + 8)
       : NODE_HEIGHT;
-  return { height, labelIn, labelOut };
+  // Both sides share one vertical band. A labelled side fills it row by row; an
+  // unlabelled side spreads its dots down the same band rather than down the
+  // whole card, so the lone output of a labelled tool still lines up with its
+  // inputs instead of floating up next to the header.
+  const band: PortBand =
+    labelIn || labelOut
+      ? { top: CARD_HEADER_HEIGHT, height: rows * PORT_ROW_HEIGHT }
+      : { top: 0, height: NODE_HEIGHT };
+  return { height, labelIn, labelOut, band };
+}
+
+/** The vertical span of a card given over to its port connectors. */
+interface PortBand {
+  top: number;
+  height: number;
 }
 
 /**
@@ -197,18 +227,15 @@ function portPosition(
   index: number,
   count: number,
   side: "in" | "out",
-  height: number = NODE_HEIGHT,
+  band: PortBand = { top: 0, height: NODE_HEIGHT },
   labelled = false,
 ): { x: number; y: number } {
   const x = side === "in" ? node.x : node.x + NODE_WIDTH;
   if (labelled) {
-    return {
-      x,
-      y: node.y + CARD_HEADER_HEIGHT + PORT_ROW_HEIGHT * index + PORT_ROW_HEIGHT / 2,
-    };
+    return { x, y: node.y + band.top + PORT_ROW_HEIGHT * index + PORT_ROW_HEIGHT / 2 };
   }
-  const spacing = height / (count + 1);
-  return { x, y: node.y + spacing * (index + 1) };
+  const spacing = band.height / (count + 1);
+  return { x, y: node.y + band.top + spacing * (index + 1) };
 }
 
 interface ModelBuilderPanelProps {
@@ -1130,7 +1157,8 @@ export function ModelBuilderPanel({
       height: Math.max(
         acc.height,
         node.y +
-          cardLayout(portsOf(node, resolveDescriptor(node.provider, node.toolId))).height +
+          cardLayout(portsOf(node, resolveDescriptor(node.provider, node.toolId)), node.kind)
+            .height +
           80,
       ),
     }),
@@ -1729,13 +1757,13 @@ function GraphEdges({
     if (index < 0) return null;
     // Same geometry the card uses, or a labelled multi-port node would draw its
     // curves to where the dots used to be.
-    const layout = cardLayout(ports);
+    const layout = cardLayout(ports, node.kind);
     return portPosition(
       node,
       index,
       list.length,
       side,
-      layout.height,
+      layout.band,
       side === "in" ? layout.labelIn : layout.labelOut,
     );
   };
@@ -1839,7 +1867,7 @@ const GraphNodeCard = memo(function GraphNodeCard({
 }): ReactElement {
   const { t } = useTranslation();
   const ports = portsOf(node, descriptor);
-  const layout = cardLayout(ports);
+  const layout = cardLayout(ports, node.kind);
   const title =
     node.kind === "input"
       ? (layers.find((layer) => layer.id === node.layerId)?.name ??
@@ -1896,7 +1924,7 @@ const GraphNodeCard = memo(function GraphNodeCard({
           index,
           ports.inputs.length,
           "in",
-          layout.height,
+          layout.band,
           layout.labelIn,
         );
         return (
@@ -1939,7 +1967,7 @@ const GraphNodeCard = memo(function GraphNodeCard({
           index,
           ports.outputs.length,
           "out",
-          layout.height,
+          layout.band,
           layout.labelOut,
         );
         return (
