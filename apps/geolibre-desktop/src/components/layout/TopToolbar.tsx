@@ -195,6 +195,14 @@ interface TopToolbarProps {
   viewer?: boolean;
 }
 
+/** Translation keys for the reasons a Zarr variable cannot be added. */
+const ZARR_PROBLEM_KEYS = {
+  group: "stacPlugin.zarrProblemGroup",
+  unauthorized: "stacPlugin.zarrProblemUnauthorized",
+  "unsupported-url": "stacPlugin.zarrProblemUnsupportedUrl",
+  unavailable: "stacPlugin.zarrProblemUnavailable",
+} as const;
+
 export function TopToolbar({
   compact = false,
   diagnosticsErrorCount,
@@ -953,7 +961,12 @@ export function TopToolbar({
       formatGeoJson: t("stacPlugin.formatGeoJson"),
       formatPmtiles: t("stacPlugin.formatPmtiles"),
       formatParquet: t("stacPlugin.formatParquet"),
+      formatZarr: t("stacPlugin.formatZarr"),
       formatUnknown: t("stacPlugin.formatUnknown"),
+      addNoTarget: t("stacPlugin.addNoTarget"),
+      addIcechunk: t("stacPlugin.addIcechunk"),
+      zarrProblem: (problem) => t(ZARR_PROBLEM_KEYS[problem]),
+      chooseTarget: t("stacPlugin.chooseTarget"),
       notAddable: t("stacPlugin.notAddable"),
     });
   }, [t]);
