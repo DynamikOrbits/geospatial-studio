@@ -1241,17 +1241,14 @@ export class MapController {
         const keys = new Set([...Object.keys(layer), ...Object.keys(previous)]);
         keys.delete("timeFilter");
         return [...keys].every(
-          (key) =>
-            layer[key as keyof GeoLibreLayer] === previous[key as keyof GeoLibreLayer],
+          (key) => layer[key as keyof GeoLibreLayer] === previous[key as keyof GeoLibreLayer],
         );
       });
 
     if (isTimeFilterOnlyPass) {
       for (let index = layers.length - 1; index >= 0; index -= 1) {
         if (layers[index].timeFilter === this.syncedLayers[index].timeFilter) continue;
-        if (
-          !syncLayerTimeFilter(map, layers[index], this.syncedLayers[index].timeFilter)
-        ) {
+        if (!syncLayerTimeFilter(map, layers[index], this.syncedLayers[index].timeFilter)) {
           syncLayer(map, layers[index], this.getBeforeStyleLayerId(layers, index));
         }
       }
