@@ -538,6 +538,8 @@ export interface GeoLibreAppAPI {
   removeLayerGroup?: (id: string) => void;
   fitBounds?: (bounds: [number, number, number, number]) => void;
   getMap?: () => MapLibreMap | null;
+  /** Apply a transient timeline filter directly to a rendered layer. */
+  setLayerTimeFilter?: (layerId: string, filter: unknown[] | undefined) => boolean;
   /**
    * Open an http(s) URL in the system browser. Needed because the Tauri
    * desktop webview ignores `window.open`/`target="_blank"` and would open the

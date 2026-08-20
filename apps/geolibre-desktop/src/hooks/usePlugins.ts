@@ -1032,6 +1032,8 @@ export function createAppAPI(mapControllerRef?: RefObject<MapController | null>)
     fitBounds: (bounds: [number, number, number, number]) =>
       mapControllerRef?.current?.fitBounds(bounds),
     getMap: () => mapControllerRef?.current?.getMap() ?? null,
+    setLayerTimeFilter: (layerId, filter) =>
+      mapControllerRef?.current?.setLayerTimeFilter(layerId, filter) ?? false,
     openExternalUrl: (url: string) => void openExternalLink(url),
     pickLocalDirectoryFiles,
     // Present only on desktop (filesystem access); the Vector panel keys off its

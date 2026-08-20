@@ -770,6 +770,45 @@ describe("MapController.syncLayers vector-tile time filtering", () => {
 
     assert.deepEqual(fake.layers.get("layer-vt-vector")?.filter, POLYGON_GEOMETRY_FILTER);
   });
+
+  it("fast-paths playback ticks without resyncing unrelated layers or basemap state", () => {
+    const { map, fake } = makeFakeMap();
+    const controller = controllerWith(map);
+    const previousFilter = ["all", ["<=", ["to-number", ["get", "year"]], 1999]];
+    const buildings = vectorTileLayer("buildings", {
+      style: { ...DEFAULT_LAYER_STYLE, extrusionEnabled: true },
+      timeFilter: previousFilter,
+    });
+    const subway = vectorTileLayer("subway");
+    controller.syncLayers([subway, buildings]);
+    fake.calls.length = 0;
+
+    const nextFilter = ["all", ["<=", ["to-number", ["get", "year"]], 2000]];
+    controller.syncLayers([subway, { ...buildings, timeFilter: nextFilter }]);
+
+    assert.deepEqual(fake.layers.get("layer-buildings-vector-extrusion")?.filter, [
+      "all",
+      POLYGON_GEOMETRY_FILTER,
+      nextFilter,
+    ]);
+    assert.equal(
+      fake.calls.some((call) => String(call.args[0]).includes("subway")),
+      false,
+      "the unchanged subway layer is not revisited",
+    );
+    assert.equal(
+      fake.calls.some(
+        (call) => call.method === "setPaintProperty" && call.args[0] === "basemap-bg",
+      ),
+      false,
+      "basemap state is not reapplied on a playback tick",
+    );
+    assert.deepEqual(
+      [...new Set(fake.calls.map((call) => call.method))],
+      ["setFilter"],
+      "the tick directly replaces the native filter without other layer reconciliation",
+    );
+  });
 });
 
 describe("MapController basemap controls", () => {

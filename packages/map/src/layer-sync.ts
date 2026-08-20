@@ -3629,6 +3629,67 @@ function moveLayer(map: maplibregl.Map, id: string, beforeId?: string): void {
   }
 }
 
+/**
+ * Replace an already-applied transient time filter without rebuilding the
+ * layer's sources, paint, layout, zoom range, or stack position. Returns false
+ * when the previous filter cannot be found, allowing the caller to fall back
+ * to normal reconciliation (notably for the first bound frame).
+ */
+export function syncLayerTimeFilter(
+  map: maplibregl.Map,
+  layer: GeoLibreLayer,
+  previousTimeFilter: unknown[] | undefined,
+): boolean {
+  if (!Array.isArray(previousTimeFilter) || previousTimeFilter.length === 0) return false;
+
+  const previousKey = JSON.stringify(previousTimeFilter);
+  const nextTimeFilter = layer.timeFilter;
+  const nextIds = new Set([
+    ...getExternalNativeLayerIds(layer),
+    ...getExternalNativeLayerIds(layer).map(externalExtrusionLayerId),
+    ...mbtilesAllStyleLayerIds(layer),
+    fillLayerId(layer.id),
+    fillExtrusionLayerId(layer.id),
+    lineLayerId(layer.id),
+    circleLayerId(layer.id),
+    heatmapLayerId(layer.id),
+    textLayerId(layer.id),
+    markerLayerId(layer.id),
+    labelLayerId(layer.id),
+    lineDecorationLayerId(layer.id),
+    generatorFillLayerId(layer.id),
+    generatorLineLayerId(layer.id),
+    generatorCircleLayerId(layer.id),
+    ...vectorTileAllStyleLayerIds(layer),
+  ]);
+  let changed = false;
+
+  for (const id of nextIds) {
+    if (!map.getLayer(id)) continue;
+    const current = map.getFilter(id);
+    if (!Array.isArray(current) || current[0] !== "all") continue;
+    const previousIndex = current.findIndex(
+      (part, index) => index > 0 && JSON.stringify(part) === previousKey,
+    );
+    if (previousIndex === -1) continue;
+
+    const parts = current.slice(1);
+    const partIndex = previousIndex - 1;
+    if (Array.isArray(nextTimeFilter) && nextTimeFilter.length > 0) {
+      parts[partIndex] = nextTimeFilter as maplibregl.ExpressionSpecification;
+    } else {
+      parts.splice(partIndex, 1);
+    }
+    const next =
+      parts.length === 1
+        ? (parts[0] as maplibregl.FilterSpecification)
+        : (["all", ...parts] as maplibregl.FilterSpecification);
+    map.setFilter(id, next);
+    changed = true;
+  }
+  return changed;
+}
+
 export function removeLayerFromMap(
   map: maplibregl.Map,
   layerId: string,

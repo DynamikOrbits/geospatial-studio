@@ -48,6 +48,7 @@ import {
   removeLayerFromMap,
   styleValuesEqual,
   syncLayer,
+  syncLayerTimeFilter,
   vectorTileStyleLayerIds,
 } from "./layer-sync";
 import { globeSafeMaxZoom } from "./globe-fit-bounds";
@@ -1222,6 +1223,42 @@ export class MapController {
     if (!this.isStyleReady() || !this.map) return;
     const map = this.map;
 
+    // Playback changes only the transient timeFilter on an otherwise stable
+    // layer. Running that tick through the full reconciliation below also
+    // revisits every unrelated layer, reapplies basemap state, and rebuilds the
+    // Layer Control. At short cadences those synchronous passes can queue ahead
+    // of MapLibre's worker/render loop, leaving both the handle and buildings
+    // visibly behind. Reconcile only the changed layers in this common case.
+    // Keep the full path for an identical snapshot: style-load recovery calls
+    // syncLayers with unchanged data and still needs every native layer rebuilt.
+    const isTimeFilterOnlyPass =
+      layers.length === this.syncedLayers.length &&
+      layers.every((layer, index) => layer.id === this.syncedLayers[index]?.id) &&
+      layers.some((layer, index) => layer.timeFilter !== this.syncedLayers[index]?.timeFilter) &&
+      layers.every((layer, index) => {
+        const previous = this.syncedLayers[index];
+        if (layer === previous) return true;
+        const keys = new Set([...Object.keys(layer), ...Object.keys(previous)]);
+        keys.delete("timeFilter");
+        return [...keys].every(
+          (key) =>
+            layer[key as keyof GeoLibreLayer] === previous[key as keyof GeoLibreLayer],
+        );
+      });
+
+    if (isTimeFilterOnlyPass) {
+      for (let index = layers.length - 1; index >= 0; index -= 1) {
+        if (layers[index].timeFilter === this.syncedLayers[index].timeFilter) continue;
+        if (
+          !syncLayerTimeFilter(map, layers[index], this.syncedLayers[index].timeFilter)
+        ) {
+          syncLayer(map, layers[index], this.getBeforeStyleLayerId(layers, index));
+        }
+      }
+      this.syncedLayers = layers;
+      return;
+    }
+
     const nextIds = layers.map((l) => l.id);
     const nextIdSet = new Set(nextIds);
     const previousLayers = new Map(this.syncedLayers.map((layer) => [layer.id, layer]));
@@ -1252,6 +1289,22 @@ export class MapController {
     this.publishLayerDisplayNames(layers);
     this.refreshLayerControl(layers);
     this.syncLayerControlState();
+  }
+
+  /** Apply one timeline frame without routing it through React layer sync. */
+  setLayerTimeFilter(layerId: string, timeFilter: unknown[] | undefined): boolean {
+    if (!this.isStyleReady() || !this.map) return false;
+    const index = this.syncedLayers.findIndex((layer) => layer.id === layerId);
+    if (index === -1) return false;
+    const previous = this.syncedLayers[index];
+    const next = { ...previous, timeFilter };
+    if (!syncLayerTimeFilter(this.map, next, previous.timeFilter)) {
+      syncLayer(this.map, next, this.getBeforeStyleLayerId(this.syncedLayers, index));
+    }
+    this.syncedLayers = this.syncedLayers.map((layer, layerIndex) =>
+      layerIndex === index ? next : layer,
+    );
+    return true;
   }
 
   private styleLoadHandler: (() => void) | null = null;

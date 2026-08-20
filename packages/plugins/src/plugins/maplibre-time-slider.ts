@@ -134,6 +134,39 @@ let savedConfig: TimeSliderConfig | null = null;
 // Detaches the active control's store-sync listeners; set by attachStoreSync,
 // cleared when invoked. Bound to a specific control so handlers cannot leak.
 let detachStoreSync: (() => void) | null = null;
+let setNativeTimeFilter: GeoLibreAppAPI["setLayerTimeFilter"] = undefined;
+const pendingStoreFilters = new Map<string, unknown[]>();
+let boundFilterCommitTimer: ReturnType<typeof setTimeout> | null = null;
+const pendingNativeFilters = new Map<string, unknown[]>();
+let nativeFilterTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleNativeTimeFilters(): void {
+  if (nativeFilterTimer !== null) return;
+  nativeFilterTimer = setTimeout(() => {
+    nativeFilterTimer = null;
+    for (const [id, filter] of pendingNativeFilters) {
+      setNativeTimeFilter?.(id, filter);
+    }
+    pendingNativeFilters.clear();
+  }, 100);
+}
+
+function scheduleBoundFilterStoreCommit(): void {
+  if (boundFilterCommitTimer !== null) clearTimeout(boundFilterCommitTimer);
+  boundFilterCommitTimer = setTimeout(() => {
+    boundFilterCommitTimer = null;
+    const store = useAppStore.getState();
+    applyingBoundFilters = true;
+    try {
+      for (const [id, filter] of pendingStoreFilters) {
+        store.updateLayer(id, { timeFilter: filter });
+      }
+      pendingStoreFilters.clear();
+    } finally {
+      applyingBoundFilters = false;
+    }
+  }, 500);
+}
 
 /** Stable id of this plugin, exported so the UI can activate/query it. */
 export const TIME_SLIDER_PLUGIN_ID = "maplibre-gl-time-slider";
@@ -165,6 +198,7 @@ export const maplibreTimeSliderPlugin: GeoLibrePlugin = {
       ? controlFromConfig(savedConfig)
       : new TimeSliderControl(buildDefaultOptions());
     timeSliderControl = control;
+    setNativeTimeFilter = app.setLayerTimeFilter;
     attachStoreSync(control);
 
     const added = app.addMapControl(control, timeSliderPosition);
@@ -184,6 +218,7 @@ export const maplibreTimeSliderPlugin: GeoLibrePlugin = {
     detachStoreSync?.();
     app.removeMapControl(timeSliderControl);
     timeSliderControl = null;
+    setNativeTimeFilter = undefined;
     removeAllTimeSliderStoreLayers();
   },
   getMapControlPosition: () => timeSliderPosition,
@@ -620,7 +655,14 @@ function applyBoundFilters(control: TimeSliderControl, bound: BoundLayer[]): voi
       // Compare against the last filter we applied (one serialization) rather
       // than re-serializing the stored filter on every tick.
       if (appliedFilterKeys.get(id) !== key) {
-        store.updateLayer(id, { timeFilter: filter });
+        if (setNativeTimeFilter) {
+          pendingNativeFilters.set(id, filter);
+          scheduleNativeTimeFilters();
+          pendingStoreFilters.set(id, filter);
+          scheduleBoundFilterStoreCommit();
+        } else {
+          store.updateLayer(id, { timeFilter: filter });
+        }
         appliedFilterKeys.set(id, key);
       }
     }
@@ -724,6 +766,8 @@ function clearBoundFilters(ids: string[]): void {
   try {
     for (const id of ids) {
       appliedFilterKeys.delete(id);
+      pendingNativeFilters.delete(id);
+      pendingStoreFilters.delete(id);
       const layer = store.layers.find((item) => item.id === id);
       if (layer && layer.timeFilter !== undefined) {
         store.updateLayer(id, { timeFilter: undefined });
