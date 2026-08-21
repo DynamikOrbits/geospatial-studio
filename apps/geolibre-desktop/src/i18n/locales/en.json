@@ -338,6 +338,10 @@
       "video": {
         "label": "Add Video Layer",
         "description": "Add a georeferenced video overlay by supplying an MP4 URL and four corner coordinates."
+      },
+      "polyline": {
+        "label": "Add Encoded Polyline Layer",
+        "description": "Import encoded polyline strings (Google, OSRM, Valhalla) from text or files as vector lines."
       }
     },
     "shared": {
@@ -768,6 +772,47 @@
       "bottomRight": "Bottom-right (lng, lat)",
       "bottomLeft": "Bottom-left (lng, lat)",
       "cornersNote": "The four corners georeference the video on the map. The video must be served over HTTPS and the host must allow cross-origin requests (CORS) for the frames to render."
+    },
+    "polyline": {
+      "defaultName": "Polyline",
+      "modePaste": "Paste text",
+      "modeFile": "Choose file",
+      "precisionLabel": "Precision",
+      "precision5": "5 (Google / OSRM)",
+      "precision6": "6 (Valhalla / Mapbox)",
+      "unescapeLabel": "Unescape backslashes (\\\\ to \\)",
+      "delimiterLabel": "Polyline delimiter",
+      "delimNewline": "Newline (default)",
+      "delimSemicolon": "Semicolon (;)",
+      "delimComma": "Comma (,)",
+      "delimTab": "Tab",
+      "delimCustom": "Custom delimiter",
+      "customDelimPlaceholder": "Custom delimiter (e.g. | or ---)",
+      "outputGeometryLabel": "Output geometry",
+      "separateLines": "Separate LineStrings",
+      "multiLineString": "Single MultiLineString",
+      "textLabel": "Encoded polyline string(s)",
+      "placeholder": "Paste encoded polyline string (e.g. _p~iF~ps|U_ulLnnqC_mqNvxq`@)...",
+      "previewInfo": "Decoded {{lines}} line(s) with {{points}} total coordinate points.",
+      "previewTitle": "Decoded Geometry Preview",
+      "previewExtent": "Extent",
+      "previewLength": "Length",
+      "previewCoordinates": "Inspect coordinates",
+      "previewLine": "Line",
+      "previewPoints": "points",
+      "previewStart": "Start",
+      "previewEnd": "End",
+      "errorFileMissing": "The selected file is empty or could not be read.",
+      "readError": "Could not read the polyline file.",
+      "errorChooseFile": "Please choose a polyline file to load.",
+      "errorEmptyInput": "Enter one or more encoded polyline strings.",
+      "errorNoValidLines": "No valid polyline coordinates could be decoded.",
+      "sampleGoogle": "Google / OSRM (precision 5)",
+      "sampleValhalla": "Valhalla / Mapbox (precision 6)",
+      "sampleEscaped": "Escaped backslashes (JSON string format)",
+      "sampleMultiLine": "Multi-line route batch (3 segments)",
+      "unitMeters": "{{value}} m",
+      "unitKm": "{{value}} km"
     },
     "netcdf": {
       "sampleLabel": "Air temperature",
@@ -2309,6 +2354,7 @@
       "delimitedText": "Delimited Text Layer",
       "photos": "Geotagged Photos",
       "gpx": "GPX Layer",
+      "polyline": "Encoded Polyline",
       "mbtiles": "MBTiles Layer",
       "xyz": "XYZ Layer",
       "wms": "WMS Layer",
@@ -2409,6 +2455,8 @@
       "dissolve": "Dissolve",
       "boundingBox": "Bounding box",
       "simplify": "Simplify",
+      "decodePolyline": "Decode polyline",
+      "encodePolyline": "Encode line to polyline",
       "clip": "Clip",
       "intersection": "Intersection",
       "difference": "Difference",
@@ -4717,6 +4765,46 @@
             }
           }
         },
+        "decode-polyline": {
+          "name": "Decode polyline",
+          "description": "Decode encoded polyline strings from an attribute field into a LineString vector layer",
+          "params": {
+            "layer": {
+              "label": "Input layer"
+            },
+            "field": {
+              "label": "Polyline field",
+              "description": "Attribute field containing the encoded polyline string"
+            },
+            "precision": {
+              "label": "Precision",
+              "options": {
+                "5": "5 (Google / OSRM)",
+                "6": "6 (Valhalla / Mapbox)"
+              }
+            }
+          }
+        },
+        "encode-polyline": {
+          "name": "Encode line to polyline",
+          "description": "Encode LineString and MultiLineString geometries into an encoded polyline attribute string",
+          "params": {
+            "layer": {
+              "label": "Input layer"
+            },
+            "precision": {
+              "label": "Precision",
+              "options": {
+                "5": "5 (Google / OSRM)",
+                "6": "6 (Valhalla / Mapbox)"
+              }
+            },
+            "targetField": {
+              "label": "Output field name",
+              "description": "Name of the attribute column to store encoded polylines (default: polyline)"
+            }
+          }
+        },
         "dggs-grid": {
           "name": "DGGS Generator",
           "description": "Fill an area with DGGS cells (H3, S2, A5, DGGRID, DGGAL). Source: a layer's geometry, a layer's extent, the current map view, or a manual bounding box.",
@@ -6736,6 +6824,7 @@
     "exportedWithWarnings": "Layer exported. {{warnings}}",
     "exported": "Layer exported.",
     "exportLayerError": "Could not export this layer.",
+    "exportPolyline": "Encoded Polyline (precision {{precision}})",
     "refreshIntervals": {
       "off": "Off",
       "s15": "15 seconds",
