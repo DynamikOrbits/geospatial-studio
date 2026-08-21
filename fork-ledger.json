@@ -1,0 +1,50 @@
+{
+  "$comment": "Seam ledger — every upstream file this fork modifies, with why and status. See FORK.md §3. Checked by scripts/check-fork-divergence.mjs. status: 'upstream-candidate' (we intend to PR it to opengeos; remove the entry once it lands) or 'permanent' (divergence we accept to carry).",
+  "seams": [
+    {
+      "path": "packages/plugins/src/types.ts",
+      "reason": "G1 assistant tool registry: GeoLibreAssistantTool types + registerAssistantTool/unregisterAssistantTool on GeoLibreAppAPI",
+      "status": "upstream-candidate"
+    },
+    {
+      "path": "packages/plugins/src/index.ts",
+      "reason": "G1: re-export assistant-tool-registry",
+      "status": "upstream-candidate"
+    },
+    {
+      "path": "packages/plugins/src/plugin-manager.ts",
+      "reason": "G1: owner injection for registerAssistantTool/unregisterAssistantTool in scopeAppToPlugin",
+      "status": "upstream-candidate"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/lib/assistant/tools.ts",
+      "reason": "G1: append registry tools to the agent tool set + describePluginTools()",
+      "status": "upstream-candidate"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/lib/assistant/agent.ts",
+      "reason": "G1: dynamic system-prompt section listing plugin tools",
+      "status": "upstream-candidate"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/components/panels/AssistantPanel.tsx",
+      "reason": "G1: rebuild the cached agent when the tool registry changes",
+      "status": "upstream-candidate"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/components/layout/TopToolbar.tsx",
+      "reason": "G1: command-palette entries for plugin tools that opt in via command",
+      "status": "upstream-candidate"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/hooks/usePlugins.ts",
+      "reason": "G1: wire register/unregisterAssistantTool into createAppAPI",
+      "status": "upstream-candidate"
+    },
+    {
+      "path": "docs/plugin-api.md",
+      "reason": "G1: Assistant tools documentation section",
+      "status": "upstream-candidate"
+    }
+  ]
+}
