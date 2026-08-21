@@ -5,9 +5,13 @@
 is OUR file (it does not exist upstream) and every contributor — human or
 agent — follows it.*
 
-> **Standing rule (Matthieu, 2026-08-21): we do not contribute to upstream.**
-> No pull requests, no issues, no contact with opengeos — we consume upstream
-> releases, nothing flows the other way. Only Matthieu can ever change this.
+> **Standing rule (Matthieu, 2026-08-21): upstream contributions are the
+> exception, decided by Matthieu case by case — and only for things that
+> genuinely serve GeoLibre**: real bug fixes, real improvements discovered
+> while building. **Never for our own convenience**: a seam that exists to
+> serve Dynamik Studio (however "generic" it looks) is OUR maintenance burden
+> to carry, not something to offload onto opengeos. No unprompted PRs, no
+> framing our needs as their roadmap.
 
 ## 1. The model: merge-based soft fork
 
@@ -75,16 +79,22 @@ per-upstream-release) syncs keep every conflict trivial.
 
 ## 5. Relationship with upstream
 
-**One-way: we consume, we never contribute** (standing rule, top of this
-file). What being a lawful, respectful MIT fork requires — and all it
-requires:
+We consume upstream releases; what flows the other way is governed by the
+standing rule at the top of this file. The test for any would-be
+contribution is simple: **who does it serve?**
 
-- **Attribution stays.** Upstream LICENSE and copyright notices are preserved;
-  the About surface says "based on GeoLibre" with a link; we do not claim
-  upstream's work as ours.
-- **Seams are ours to carry.** Even generic improvements stay in this fork;
-  the ledger tracks their cost. We still write them to upstream quality —
-  clean seams merge more cheaply at every sync.
+- **Serves GeoLibre** — a real bug we found and fixed, a genuine improvement
+  any GeoLibre user would want: eligible to propose upstream, written as
+  their project's need (their style, their tests, no mention of our
+  roadmap), **when Matthieu decides**, case by case.
+- **Serves our fork** — a seam that exists so Dynamik Studio can do its
+  thing: never proposed, however generic it looks. Proposing it would be
+  offloading our maintenance onto them. It lives in the ledger and we carry
+  it. We still write seams to upstream quality — clean seams merge more
+  cheaply at every sync.
+- **Attribution stays.** Upstream LICENSE and copyright notices are
+  preserved; the About surface says "based on GeoLibre" with a link; we do
+  not claim upstream's work as ours.
 - Space-domain capability (orbits, constellations, simulation, catalogs) is
   OUR product and stays in our own modules and in the dynamik-mono-next
   plugins — additive, so it never touches upstream files at all.
