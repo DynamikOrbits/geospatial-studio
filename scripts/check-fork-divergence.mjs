@@ -6,7 +6,7 @@
  * added files are always fine (additive divergence), but every modified,
  * deleted, or renamed-away upstream file must have an entry in
  * fork-ledger.json. Also warns about stale ledger entries (seams that no
- * longer diverge — e.g. healed by an upstream PR landing).
+ * longer diverge — e.g. upstream independently implemented the same thing).
  *
  * Usage:
  *   node scripts/check-fork-divergence.mjs              # working tree vs merge-base

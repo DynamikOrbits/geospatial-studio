@@ -1,9 +1,13 @@
 # Fork doctrine — how Dynamik Studio stays a good GeoLibre fork
 
 *This repo is a public fork of [opengeos/GeoLibre](https://github.com/opengeos/GeoLibre)
-(MIT). This file is the contract that keeps upstream merges cheap forever and
-keeps us a good citizen of the GeoLibre ecosystem. It is OUR file (it does not
-exist upstream) and every contributor — human or agent — follows it.*
+(MIT). This file is the contract that keeps upstream merges cheap forever. It
+is OUR file (it does not exist upstream) and every contributor — human or
+agent — follows it.*
+
+> **Standing rule (Matthieu, 2026-08-21): we do not contribute to upstream.**
+> No pull requests, no issues, no contact with opengeos — we consume upstream
+> releases, nothing flows the other way. Only Matthieu can ever change this.
 
 ## 1. The model: merge-based soft fork
 
@@ -36,13 +40,9 @@ Two hard prohibitions:
 
 ## 3. The seam ledger — the machine-checked delimitation
 
-The delimitation you are asking "where does it live?" about lives here:
-[`fork-ledger.json`](fork-ledger.json). Every upstream file we modify (a
-**seam**) has an entry: path, why, and status —
-
-- `upstream-candidate`: generic improvement we intend to PR to opengeos.
-  Once merged upstream, the seam disappears from our diff — divergence shed.
-- `permanent`: divergence we accept to carry (should be rare and small).
+The delimitation lives here: [`fork-ledger.json`](fork-ledger.json). Every
+upstream file we modify (a **seam**) has an entry: path and why. Seams are
+divergence we carry knowingly at every sync — keep them rare and small.
 
 The guard: [`scripts/check-fork-divergence.mjs`](scripts/check-fork-divergence.mjs)
 diffs `upstream/main...HEAD` and fails when an upstream file is modified or
@@ -53,8 +53,9 @@ any PR and in CI:
 node scripts/check-fork-divergence.mjs
 ```
 
-It also flags **stale ledger entries** (seams that healed — e.g. after an
-upstream PR landed) so the ledger stays honest in both directions.
+It also flags **stale ledger entries** (seams that no longer diverge — e.g.
+upstream independently implemented the same thing) so the ledger stays honest
+in both directions.
 
 ## 4. The sync ritual
 
@@ -72,23 +73,21 @@ per-upstream-release) syncs keep every conflict trivial.
 6. PR into `main` with a short sync note: upstream range merged, seams
    touched, anything newly disabled/replaced.
 
-## 5. Upstream-first citizenship
+## 5. Relationship with upstream
 
-We keep GeoLibre's MIT license and we want to be a good fork in the spirit of
-the opengeos project:
+**One-way: we consume, we never contribute** (standing rule, top of this
+file). What being a lawful, respectful MIT fork requires — and all it
+requires:
 
-- **Generic before specific.** Any seam that is not space-domain-specific is
-  written to upstream quality (their code style, docs section, tests) and
-  offered as a PR to opengeos. Our first seam — plugin-contributed assistant
-  tools — is exactly that kind of candidate.
 - **Attribution stays.** Upstream LICENSE and copyright notices are preserved;
   the About surface says "based on GeoLibre" with a link; we do not claim
   upstream's work as ours.
-- **We report bugs upstream** when we find them, with repros, even when we
-  also patch locally to unblock.
+- **Seams are ours to carry.** Even generic improvements stay in this fork;
+  the ledger tracks their cost. We still write them to upstream quality —
+  clean seams merge more cheaply at every sync.
 - Space-domain capability (orbits, constellations, simulation, catalogs) is
   OUR product and stays in our own modules and in the dynamik-mono-next
-  plugins — it is additive, so it burdens neither upstream nor the merge.
+  plugins — additive, so it never touches upstream files at all.
 
 ## 6. Branding and identity
 
