@@ -143,6 +143,7 @@ export type VectorToolKind =
   | "space-time-proximity"
   | "decode-polyline"
   | "encode-polyline"
+  | "merge-layers"
   | "check-validity"
   | "fix-geometries"
   | "check-topology-rules"

@@ -2487,6 +2487,7 @@
       "trajectorySpeed": "Trajectory speed",
       "detectStops": "Detect stops",
       "spaceTimeProximity": "Space-time proximity",
+      "mergeLayers": "Merge layers",
       "checkValidity": "Check validity",
       "fixGeometries": "Fix geometries",
       "checkTopologyRules": "Check topology rules",
@@ -2671,6 +2672,7 @@
       "subGroupDggs": "DGGS",
       "subGroupH3": "DGGS",
       "subGroupMovement": "Movement & time",
+      "subGroupDataManagement": "Data management",
       "subGroupDataQuality": "Data quality",
       "subGroupTerrain": "Terrain",
       "subGroupReproject": "Reproject",
@@ -4249,7 +4251,9 @@
     "parameterField": {
       "selectLayer": "Select a layer...",
       "selectField": "Select a field...",
-      "selectLayerFirst": "Select a layer first"
+      "selectLayerFirst": "Select a layer first",
+      "layersSelected_one": "{{count}} layer selected",
+      "layersSelected_other": "{{count}} layers selected"
     },
     "whitebox": {
       "run": "Run",
@@ -5155,6 +5159,24 @@
             }
           }
         },
+        "merge-layers": {
+          "name": "Merge layers",
+          "description": "Combine several vector layers into one, uniting their attribute schemas (missing attributes become null)",
+          "params": {
+            "layers": {
+              "label": "Input layers",
+              "description": "Select two or more layers; they are concatenated in the order shown"
+            },
+            "addSourceField": {
+              "label": "Add source layer field",
+              "description": "Record each output feature's originating layer name"
+            },
+            "sourceFieldName": {
+              "label": "Source field name",
+              "description": "Name of the field that stores the originating layer name"
+            }
+          }
+        },
         "check-validity": {
           "name": "Check validity",
           "description": "Find features with invalid geometry (GEOS rules: self-intersecting rings, holes outside shells, ...) and mark them on the map",
@@ -5815,6 +5837,7 @@
     "toolGroup": {
       "analysis": "Analysis",
       "clip": "Clip",
+      "dataManagement": "Data management",
       "dataQuality": "Data quality",
       "dggs": "DGGS",
       "geometry": "Geometry",

@@ -2743,6 +2743,142 @@ export const spaceTimeProximityTool: ProcessingAlgorithm = {
   },
 };
 
+export const mergeLayersTool: ProcessingAlgorithm = {
+  id: "merge-layers",
+  name: "Merge layers",
+  description:
+    "Combine several vector layers into one, uniting their attribute schemas (missing attributes become null)",
+  group: "Data management",
+  parameters: [
+    {
+      id: "layers",
+      label: "Input layers",
+      type: "layers",
+      required: true,
+      description: "Select two or more layers; they are concatenated in the order shown",
+    },
+    {
+      id: "addSourceField",
+      label: "Add source layer field",
+      type: "boolean",
+      default: true,
+      description: "Record each output feature's originating layer name",
+    },
+    {
+      id: "sourceFieldName",
+      label: "Source field name",
+      type: "string",
+      default: "source",
+      description: "Name of the field that stores the originating layer name",
+    },
+  ],
+  run: (ctx) => {
+    // De-duplicate: the multi-select cannot repeat an option, but a replayed
+    // History entry could, and merging a layer into itself twice is never meant.
+    const ids = Array.isArray(ctx.parameters.layers)
+      ? [...new Set(ctx.parameters.layers as string[])]
+      : [];
+    if (ids.length < 2) {
+      ctx.log('Error: parameter "layers" requires at least two selected layers');
+      return;
+    }
+    const addSource = ctx.parameters.addSourceField !== false;
+    const rawFieldName = (ctx.parameters.sourceFieldName as string)?.trim();
+    const sourceField = rawFieldName || "source";
+
+    // Resolve first so a layer deleted since it was selected (or a stale
+    // History re-run) is reported as missing rather than as merely empty.
+    const resolved = ids.map((id) => ctx.layers.find((l) => l.id === id));
+    const missing = resolved.filter((l) => !l).length;
+    if (missing) ctx.log(`Skipped ${missing} selected layer(s) that no longer exist`);
+    // Require a feature that will actually be emitted: a layer whose features
+    // all have null geometry contributes nothing to the output below, so it is
+    // a skip, not a merged layer.
+    const selected = resolved.filter((l): l is GeoLibreLayer =>
+      Boolean(l?.geojson?.features?.some((feature) => feature.geometry)),
+    );
+    const unusable = ids.length - missing - selected.length;
+    if (unusable) ctx.log(`Skipped ${unusable} selected layer(s) with no usable geometry`);
+    if (!selected.length) {
+      ctx.log("Error: none of the selected layers has usable geometry");
+      return;
+    }
+    // The source field is written last and would otherwise overwrite an input
+    // attribute of the same name, so refuse rather than silently drop data.
+    if (
+      addSource &&
+      selected.some((layer) =>
+        layer.geojson!.features.some(
+          (feature) =>
+            feature.geometry &&
+            Object.prototype.hasOwnProperty.call(feature.properties ?? {}, sourceField),
+        ),
+      )
+    ) {
+      ctx.log(
+        `Error: source field '${sourceField}' already exists in an input layer; choose a different source field name`,
+      );
+      return;
+    }
+
+    // Union of property keys in first-seen order, so the merged attribute
+    // schema is stable regardless of feature iteration.
+    const schema: string[] = [];
+    const seen = new Set<string>();
+    if (addSource) {
+      schema.push(sourceField);
+      seen.add(sourceField);
+    }
+    for (const layer of selected) {
+      for (const feature of layer.geojson!.features) {
+        // Skip features the output builder drops, so a property carried only
+        // by a null-geometry feature does not become an always-null column.
+        if (!feature.geometry) continue;
+        for (const key of Object.keys(feature.properties ?? {})) {
+          if (!seen.has(key)) {
+            seen.add(key);
+            schema.push(key);
+          }
+        }
+      }
+    }
+
+    // Build fresh features (no `id`): two input layers routinely number their
+    // features from the same base, so carrying ids across a merge would emit
+    // duplicates, which would corrupt MapLibre feature state. Same reasoning as
+    // the one-to-many spatial join above.
+    const out = featureCollection(
+      selected.flatMap((layer) =>
+        layer
+          .geojson!.features.filter((feature) => feature.geometry)
+          .map((feature) => ({
+            type: "Feature" as const,
+            properties: Object.fromEntries(
+              schema.map((key) => {
+                if (key === sourceField && addSource) return [key, layer.name];
+                const props = feature.properties ?? {};
+                // Own-property lookup: a bare `props[key]` resolves "__proto__"
+                // to Object.prototype for a feature that lacks it, and `?? null`
+                // does not catch that because it is not nullish. JSON.parse does
+                // create an own "__proto__" key, so this is reachable from a file.
+                return [
+                  key,
+                  Object.prototype.hasOwnProperty.call(props, key) ? (props[key] ?? null) : null,
+                ];
+              }),
+            ),
+            geometry: feature.geometry!,
+          })),
+      ),
+    );
+
+    ctx.log(
+      `Merged ${selected.length} layer(s): ${out.features.length} feature(s), ${schema.length} attribute(s)`,
+    );
+    ctx.addResultLayer?.("Merged layers", out);
+  },
+};
+
 export const decodePolylineTool: ProcessingAlgorithm = {
   id: "decode-polyline",
   name: "Decode polyline",
@@ -2983,6 +3119,7 @@ export const VECTOR_TOOLS: ProcessingAlgorithm[] = [
   trajectorySpeedTool,
   detectStopsTool,
   spaceTimeProximityTool,
+  mergeLayersTool,
   // Data-quality tools (validity + topology rules) last, matching the menu.
   ...TOPOLOGY_TOOLS,
 ];
