@@ -13,6 +13,8 @@ import tin from "@turf/tin";
 import sector from "@turf/sector";
 import circle from "@turf/circle";
 import distance from "@turf/distance";
+import bearing from "@turf/bearing";
+import destination from "@turf/destination";
 import bbox from "@turf/bbox";
 import booleanIntersects from "@turf/boolean-intersects";
 import booleanContains from "@turf/boolean-contains";
@@ -1691,6 +1693,299 @@ export const smoothTool: ProcessingAlgorithm = {
   },
 };
 
+/**
+ * Split any geometry into its linear "parts": each ring of a polygon, each
+ * line of a (multi)linestring, or the single coordinate of a point. Used by
+ * Extract vertices and Points along geometry to walk coordinates uniformly.
+ */
+function geometryParts(geometry: Geometry): Position[][] {
+  switch (geometry.type) {
+    case "Point":
+      return [[geometry.coordinates]];
+    case "MultiPoint":
+      return geometry.coordinates.map((pos) => [pos]);
+    case "LineString":
+      return [geometry.coordinates];
+    case "MultiLineString":
+      return geometry.coordinates;
+    case "Polygon":
+      return geometry.coordinates;
+    case "MultiPolygon":
+      return geometry.coordinates.flat();
+    case "GeometryCollection":
+      return geometry.geometries.flatMap(geometryParts);
+    default:
+      return [];
+  }
+}
+
+/** Line/polygon coordinate rings of a geometry, unwrapping GeometryCollections. */
+function linearParts(geometry: Geometry): Position[][] {
+  if (geometry.type === "GeometryCollection") return geometry.geometries.flatMap(linearParts);
+  return isFamily(geometry, "line") || isFamily(geometry, "polygon") ? geometryParts(geometry) : [];
+}
+
+export const extractVerticesTool: ProcessingAlgorithm = {
+  id: "extract-vertices",
+  name: "Extract vertices",
+  description:
+    "Convert every vertex of the input features into a point, keeping the original attributes plus vertex_index and part_index columns (same-named source attributes are overwritten)",
+  group: "Geometry",
+  parameters: [{ id: "layer", label: "Input layer", type: "layer", required: true }],
+  run: (ctx) => {
+    const fc = requireFeatures(ctx);
+    if (!fc) return;
+    const points: Feature<Point>[] = [];
+    let skipped = 0;
+    for (const feature of fc.features) {
+      const geometry = feature.geometry;
+      if (!geometry) {
+        skipped += 1;
+        continue;
+      }
+      const parts = geometryParts(geometry);
+      if (!parts.length) {
+        skipped += 1;
+        continue;
+      }
+      for (const [partIndex, part] of parts.entries()) {
+        for (const [vertexIndex, position] of part.entries()) {
+          points.push({
+            type: "Feature",
+            properties: {
+              ...(feature.properties ?? {}),
+              vertex_index: vertexIndex,
+              part_index: partIndex,
+            },
+            geometry: { type: "Point", coordinates: [...position] as Position },
+          });
+        }
+      }
+    }
+    if (!points.length) {
+      ctx.log("Error: no vertices found in the input layer");
+      return;
+    }
+    if (skipped) ctx.log(`Skipped ${skipped} feature(s) with no usable geometry`);
+    ctx.log(`Extracted ${points.length} vertex point(s)`);
+    ctx.addResultLayer?.("Vertices", featureCollection(points));
+  },
+};
+
+/** Units accepted by Points along geometry; @turf/distance speaks all three. */
+type AlongUnits = "kilometers" | "meters" | "miles";
+
+/**
+ * Hard ceiling on generated points so a tiny interval on a long geometry
+ * cannot freeze the tab (the same guard {@link GRID_HARD_CAP} gives the grid).
+ */
+const POINTS_ALONG_HARD_CAP = 1_000_000;
+
+/**
+ * Forward-only cursor that yields a point every {@link interval} (in Turf's
+ * Earth-scaled units; see {@link bodyLengthToEarth}) along an open coordinate
+ * ring, together with the interval multiple it sits on. Segment lengths are haversine and the position inside a
+ * segment is found geodesically (bearing + destination), so the measured
+ * `distance` attribute and the emitted coordinate agree even on long
+ * high-latitude segments where linear lon/lat interpolation drifts. Each
+ * segment is visited once, so a walk is O(points + vertices) rather than
+ * re-scanning the ring from its first vertex for every point.
+ */
+function* walkAlong(
+  positions: Position[],
+  interval: number,
+  units: AlongUnits,
+  segmentLengths: number[],
+): Generator<{ position: Position; step: number }> {
+  let travelled = 0;
+  let atDistance = 0;
+  let step = 0;
+  for (let i = 1; i < positions.length; i += 1) {
+    const start = positions[i - 1];
+    const end = positions[i];
+    const segment = segmentLengths[i - 1];
+    if (segment <= 0) continue;
+    let heading: number | null = null;
+    // A step landing within float noise of a vertex snaps to the vertex itself
+    // (exact coordinates), so the caller's endpoint dedup never sees a point a
+    // few ulps short of the end vertex. The noise in `atDistance - travelled`
+    // scales with the *accumulated* distance, not with this segment, so the
+    // tolerance follows the running totals: a segment-proportional epsilon is
+    // far below the noise for a short segment late in a long ring, and far
+    // above it (centimetres) for a single segment thousands of km long. The
+    // 1e-12 factor is ~4500 ulp at any magnitude, enough slack to absorb the
+    // per-vertex error of summing a dense ring.
+    const epsilon = (travelled + segment) * 1e-12;
+    while (atDistance <= travelled + segment + epsilon) {
+      const offset = atDistance - travelled;
+      let position: Position;
+      // Exact vertices keep their full position; interior points are placed
+      // geodesically in 2-D by Turf, so any Z is interpolated back in here to
+      // keep a 3-D input from coming out with elevation only at its vertices.
+      if (offset <= epsilon) position = [...start] as Position;
+      else if (offset >= segment - epsilon) position = [...end] as Position;
+      else {
+        heading ??= bearing(start, end);
+        position = destination(start, offset, heading, { units }).geometry.coordinates;
+        if (typeof start[2] === "number" && typeof end[2] === "number") {
+          position = [
+            position[0],
+            position[1],
+            start[2] + (end[2] - start[2]) * (offset / segment),
+          ];
+        }
+      }
+      yield { position, step };
+      step += 1;
+      atDistance = step * interval;
+    }
+    travelled += segment;
+  }
+}
+
+/** Haversine lengths of an open coordinate ring's segments. */
+function ringSegmentLengths(positions: Position[], units: AlongUnits): number[] {
+  const lengths: number[] = [];
+  for (let i = 1; i < positions.length; i += 1) {
+    lengths.push(distance(positions[i - 1], positions[i], { units }));
+  }
+  return lengths;
+}
+
+export const pointsAlongGeometryTool: ProcessingAlgorithm = {
+  id: "points-along-geometry",
+  name: "Points along geometry",
+  description:
+    "Generate points at a fixed distance interval along lines and polygon boundaries; the first and last vertices are always included. Each point gets a distance column (a same-named source attribute is overwritten)",
+  group: "Geometry",
+  parameters: [
+    {
+      id: "layer",
+      label: "Input layer",
+      type: "layer",
+      required: true,
+      geometryFilter: ["line", "polygon"],
+    },
+    {
+      id: "interval",
+      label: "Interval",
+      type: "number",
+      required: true,
+      default: 1,
+      min: 0.000001,
+      step: 0.1,
+      description: "Distance between generated points",
+    },
+    {
+      id: "units",
+      label: "Units",
+      type: "select",
+      default: "kilometers",
+      options: [
+        { value: "kilometers", label: "Kilometers" },
+        { value: "meters", label: "Meters" },
+        { value: "miles", label: "Miles" },
+      ],
+    },
+  ],
+  run: (ctx) => {
+    const fc = requireFeatures(ctx);
+    if (!fc) return;
+    const interval = numberParam(ctx, "interval", 1);
+    if (!(interval > 0)) {
+      ctx.log("Error: interval must be greater than 0");
+      return;
+    }
+    const units = (ctx.parameters.units as string) || "kilometers";
+    if (!LINEAR_UNITS.has(units)) {
+      ctx.log(`Error: unknown units '${units}'`);
+      return;
+    }
+    const alongUnits = units as AlongUnits;
+    // Turf is Earth-locked: pre-scale the user's ground interval into Turf's
+    // frame for the walk, and post-scale every length Turf measures back into
+    // the active body's frame before it reaches the distance column.
+    const turfInterval = bodyLengthToEarth(interval);
+    const parts: {
+      feature: Feature;
+      part: Position[];
+      length: number;
+      segmentLengths: number[];
+    }[] = [];
+    let skipped = 0;
+    let estimated = 0;
+    for (const feature of fc.features) {
+      const geometry = feature.geometry;
+      const linear = geometry ? linearParts(geometry) : [];
+      if (!linear.length) {
+        skipped += 1;
+        continue;
+      }
+      for (const part of linear) {
+        if (part.length < 2) continue;
+        // Interval multiples plus the closing end vertex.
+        const segmentLengths = ringSegmentLengths(part, alongUnits);
+        const length = segmentLengths.reduce((total, segment) => total + segment, 0);
+        estimated += Math.floor(length / turfInterval) + 2;
+        parts.push({ feature, part, length, segmentLengths });
+      }
+    }
+    // Bail before allocating anything, the way gridTool does for its cells.
+    if (estimated > POINTS_ALONG_HARD_CAP) {
+      ctx.log(
+        `Error: this interval would generate about ${estimated.toLocaleString()} points (cap ${POINTS_ALONG_HARD_CAP.toLocaleString()}); use a larger interval.`,
+      );
+      return;
+    }
+    // One rounding rule for the whole distance column, so `3 * 0.1` and the
+    // measured endpoint length both read cleanly.
+    const roundDistance = (value: number) => Number(value.toFixed(6));
+    const points: Feature<Point>[] = [];
+    for (const { feature, part, length, segmentLengths } of parts) {
+      // Walk every interval multiple, then always close with the part's
+      // final vertex so endpoints survive rounding of the total length.
+      let lastPushed: Feature<Point> | undefined;
+      for (const { position, step } of walkAlong(part, turfInterval, alongUnits, segmentLengths)) {
+        lastPushed = {
+          type: "Feature",
+          properties: { ...(feature.properties ?? {}), distance: roundDistance(step * interval) },
+          geometry: { type: "Point", coordinates: position },
+        };
+        points.push(lastPushed);
+      }
+      const last = part[part.length - 1];
+      const endDistance = roundDistance(earthLengthToBody(length));
+      const previous = lastPushed?.geometry.coordinates;
+      // When the length is an (near) exact multiple of the interval, the last
+      // stepped point already sits on the end vertex; keep one point but snap
+      // it to the exact end vertex so endpoints are never off by float noise.
+      // `lastPushed` is scoped to this part, so a degenerate part (all
+      // segments zero-length) can never snap a point from another part.
+      const duplicatesEnd =
+        previous &&
+        Math.abs(previous[0] - last[0]) < 1e-9 &&
+        Math.abs(previous[1] - last[1]) < 1e-9;
+      if (duplicatesEnd && lastPushed) {
+        lastPushed.geometry.coordinates = [...last] as Position;
+        lastPushed.properties!.distance = endDistance;
+      } else if (!duplicatesEnd) {
+        points.push({
+          type: "Feature",
+          properties: { ...(feature.properties ?? {}), distance: endDistance },
+          geometry: { type: "Point", coordinates: [...last] as Position },
+        });
+      }
+    }
+    if (!points.length) {
+      ctx.log("Error: no line or polygon features found in the input layer");
+      return;
+    }
+    if (skipped) ctx.log(`Skipped ${skipped} feature(s) that are not lines or polygons`);
+    ctx.log(`Generated ${points.length} point(s) every ${interval} ${units}`);
+    ctx.addResultLayer?.("Points along geometry", featureCollection(points));
+  },
+};
+
 /** Hard ceiling on grid cells so a tiny cell size cannot freeze the tab. */
 const GRID_HARD_CAP = 1_000_000;
 
@@ -3106,6 +3401,8 @@ export const VECTOR_TOOLS: ProcessingAlgorithm[] = [
   explodeTool,
   aggregateTool,
   smoothTool,
+  extractVerticesTool,
+  pointsAlongGeometryTool,
   gridTool,
   voronoiTool,
   cellSectorsTool,

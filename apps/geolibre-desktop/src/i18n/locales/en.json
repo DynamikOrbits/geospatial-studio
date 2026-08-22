@@ -2478,6 +2478,8 @@
       "explode": "Explode",
       "aggregate": "Aggregate by attribute",
       "smooth": "Smooth",
+      "extractVertices": "Extract vertices",
+      "pointsAlongGeometry": "Points along geometry",
       "grid": "Regular grid",
       "voronoi": "Voronoi / Delaunay",
       "cellSectors": "Cell-site coverage",
@@ -4677,6 +4679,36 @@
             "iterations": {
               "label": "Iterations",
               "description": "More iterations give a smoother result (1-10)."
+            }
+          }
+        },
+        "extract-vertices": {
+          "name": "Extract vertices",
+          "description": "Convert every vertex of the input features into a point, keeping the original attributes plus vertex_index and part_index columns (same-named source attributes are overwritten)",
+          "params": {
+            "layer": {
+              "label": "Input layer"
+            }
+          }
+        },
+        "points-along-geometry": {
+          "name": "Points along geometry",
+          "description": "Generate points at a fixed distance interval along lines and polygon boundaries; the first and last vertices are always included. Each point gets a distance column (a same-named source attribute is overwritten)",
+          "params": {
+            "layer": {
+              "label": "Input layer"
+            },
+            "interval": {
+              "label": "Interval",
+              "description": "Distance between generated points"
+            },
+            "units": {
+              "label": "Units",
+              "options": {
+                "kilometers": "Kilometers",
+                "meters": "Meters",
+                "miles": "Miles"
+              }
             }
           }
         },
