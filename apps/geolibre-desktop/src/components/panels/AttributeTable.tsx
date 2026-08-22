@@ -1525,7 +1525,8 @@ export function AttributeTable({ mapControllerRef }: AttributeTableProps) {
     <section
       ref={tableSectionRef}
       aria-label={t("attributeTable.title")}
-      className="relative flex shrink-0 flex-col border-t bg-card"
+      data-collapsed={collapsed || undefined}
+      className="geolibre-attribute-table-panel relative flex shrink-0 flex-col border-t bg-card"
       style={{ height: collapsed ? undefined : tableHeight }}
     >
       {!collapsed ? (
@@ -1533,7 +1534,7 @@ export function AttributeTable({ mapControllerRef }: AttributeTableProps) {
           role="separator"
           aria-orientation="horizontal"
           aria-label={t("attributeTable.resize")}
-          className="absolute -top-1 left-0 right-0 z-20 h-2 cursor-row-resize select-none border-t border-transparent hover:border-primary"
+          className="geolibre-attribute-table-resize-handle absolute -top-1 start-0 end-0 z-20 h-2 cursor-row-resize select-none border-t border-transparent hover:border-primary"
           onMouseDown={startTableResize}
         />
       ) : null}
