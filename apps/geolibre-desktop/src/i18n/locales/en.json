@@ -6264,6 +6264,15 @@
     "addClass": "Add class",
     "removeClass": "Remove class",
     "beforeIdSavedUnavailable": "Saved (unavailable)",
+    "blendMode": "Blend",
+    "blendModeFor": "Blend mode for {{name}}",
+    "blendModes": {
+      "normal": "Normal",
+      "multiply": "Multiply",
+      "screen": "Screen",
+      "lighten": "Lighten",
+      "add": "Add"
+    },
     "raster": {
       "greyscale": "Greyscale",
       "greyscaleHint": "Toggle a greyscale basemap (drives saturation to its minimum)",

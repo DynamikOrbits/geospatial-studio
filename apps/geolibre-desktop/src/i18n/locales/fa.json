@@ -6257,6 +6257,15 @@
     "addClass": "افزودن کلاس",
     "removeClass": "حذف کلاس",
     "beforeIdSavedUnavailable": "ذخیره‌شده (در دسترس نیست)",
+    "blendMode": "ترکیب",
+    "blendModeFor": "حالت ترکیب برای {{name}}",
+    "blendModes": {
+      "normal": "عادی",
+      "multiply": "ضرب",
+      "screen": "صفحه",
+      "lighten": "روشن‌تر",
+      "add": "افزودن"
+    },
     "raster": {
       "greyscale": "خاکستری",
       "greyscaleHint": "روشن/خاموش کردن نقشهٔ پایهٔ خاکستری (اشباع را به کمینه می‌برد)",

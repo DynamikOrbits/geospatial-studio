@@ -6183,6 +6183,15 @@
     "addClass": "添加分类",
     "removeClass": "移除分类",
     "beforeIdSavedUnavailable": "已保存（不可用）",
+    "blendMode": "混合",
+    "blendModeFor": "{{name}} 的混合模式",
+    "blendModes": {
+      "normal": "正常",
+      "multiply": "正片叠底",
+      "screen": "滤色",
+      "lighten": "变亮",
+      "add": "线性减淡"
+    },
     "raster": {
       "greyscale": "灰度",
       "greyscaleHint": "切换灰度底图（将饱和度降至最低）",

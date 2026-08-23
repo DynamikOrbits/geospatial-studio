@@ -6257,6 +6257,15 @@
     "addClass": "Klasse toevoegen",
     "removeClass": "Klasse verwijderen",
     "beforeIdSavedUnavailable": "Opgeslagen (niet beschikbaar)",
+    "blendMode": "Mengen",
+    "blendModeFor": "Mengmodus voor {{name}}",
+    "blendModes": {
+      "normal": "Normaal",
+      "multiply": "Vermenigvuldigen",
+      "screen": "Bleken",
+      "lighten": "Lichter",
+      "add": "Optellen"
+    },
     "raster": {
       "greyscale": "Grijstinten",
       "greyscaleHint": "Schakel een grijstinten-achtergrondkaart in (verlaagt de verzadiging naar het minimum)",

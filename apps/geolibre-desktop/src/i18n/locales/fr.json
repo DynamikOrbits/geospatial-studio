@@ -6257,6 +6257,15 @@
     "addClass": "Ajouter une classe",
     "removeClass": "Supprimer la classe",
     "beforeIdSavedUnavailable": "Enregistré (indisponible)",
+    "blendMode": "Fusion",
+    "blendModeFor": "Mode de fusion de {{name}}",
+    "blendModes": {
+      "normal": "Normal",
+      "multiply": "Produit",
+      "screen": "Superposition",
+      "lighten": "Éclaircir",
+      "add": "Addition"
+    },
     "raster": {
       "greyscale": "Niveaux de gris",
       "greyscaleHint": "Basculer un fond de carte en niveaux de gris (réduit la saturation au minimum)",
