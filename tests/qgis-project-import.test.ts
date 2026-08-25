@@ -183,7 +183,9 @@ describe("QGIS project import", () => {
   it("maps QGIS OpenStreetMap XYZ layers to the built-in basemap", () => {
     const result = importQgisProject(osmBasemapProjectXml(), "/work/example.qgs");
 
-    assert.equal(result.project.basemapStyleUrl, "https://tiles.openfreemap.org/styles/liberty");
+    // branding-v1 (Geospatial Studio): the built-in default basemap is now
+    // OpenFreeMap Dark. Upstream substituted ".../styles/liberty".
+    assert.equal(result.project.basemapStyleUrl, "https://tiles.openfreemap.org/styles/dark");
     assert.equal(result.project.basemapVisible, false);
     assert.equal(result.project.basemapOpacity, 0.7);
     assert.deepEqual(result.project.layers, []);

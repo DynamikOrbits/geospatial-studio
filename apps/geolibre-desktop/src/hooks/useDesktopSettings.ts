@@ -204,7 +204,11 @@ export const DEFAULT_STARTUP_SETTINGS: StartupSettings = {
   mode: "default",
   projectPath: null,
   projectName: null,
-  globeByDefault: true,
+  // branding-v1 (Geospatial Studio): the product's standard view is 2D, so the
+  // empty workspace opens in mercator rather than the globe. Ledgered fork seam;
+  // upstream default is `true`. Applies to the hosted browser build too (see
+  // planStartup honoring the empty-workspace projection off the desktop).
+  globeByDefault: false,
 };
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
@@ -284,7 +288,11 @@ function normalizeStartupSettings(startup: unknown): StartupSettings {
     mode: mode === "specific" && !projectPath ? "default" : mode,
     projectPath,
     projectName,
-    globeByDefault: typeof candidate.globeByDefault === "boolean" ? candidate.globeByDefault : true,
+    // branding-v1 (Geospatial Studio): a persisted settings object that omits
+    // globeByDefault falls back to the product default (2D), consistent with
+    // DEFAULT_STARTUP_SETTINGS. Upstream fell back to `true` (globe).
+    globeByDefault:
+      typeof candidate.globeByDefault === "boolean" ? candidate.globeByDefault : false,
   };
 }
 

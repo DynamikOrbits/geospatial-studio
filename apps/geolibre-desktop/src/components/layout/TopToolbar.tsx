@@ -77,7 +77,6 @@ import {
   Info,
   Keyboard,
   Link2,
-  Map,
   MapPin,
   MessageSquare,
   Moon,
@@ -104,6 +103,7 @@ import { useVectorTileGeometryBackfill } from "../../hooks/useVectorTileGeometry
 import type { ThemeMode } from "../../hooks/useThemeMode";
 import { isMobile } from "../../lib/is-mobile";
 import { isTauri } from "../../lib/tauri-io";
+import { BrandMark } from "../../branding/BrandMark";
 import { isMaptoolkitBasemapActive } from "../../lib/maptoolkit-basemap";
 import { useDesktopSettingsStore } from "../../hooks/useDesktopSettings";
 import { MENU_MANAGED_PLUGIN_IDS, isMenuVisible, isPluginVisible } from "../../lib/ui-profile";
@@ -1845,11 +1845,6 @@ export function TopToolbar({
   // its trigger Button this class instead of `toolbarButtonClass`.
   const toolbarSecondaryButtonClass = cn(toolbarButtonClass, "hidden md:inline-flex");
   const toolbarIconClassName = cn("h-3.5 w-3.5", showLabels && "sm:me-1");
-  // "GeoLibre Desktop" is the *desktop* product name. `isTauri()` alone is true
-  // on iOS and Android too — where the app is named plain "GeoLibre" (the bundle
-  // name from tauri.ios.conf.json, the home-screen icon, and the store listing),
-  // so titling it "GeoLibre Desktop" there contradicts every other surface.
-  const appTitle = isTauri() && !isMobile() ? "GeoLibre Desktop" : "GeoLibre";
   const renderToolbarLabel = (label: string) =>
     showLabels ? <span className="hidden sm:inline">{label}</span> : null;
   const chrome: ToolbarChrome = {
@@ -1863,17 +1858,14 @@ export function TopToolbar({
   return (
     <header
       className={cn(
-        "flex min-h-11 min-w-0 shrink-0 items-center gap-1 border-b bg-card py-1",
+        "ds-topbar flex min-h-11 min-w-0 shrink-0 items-center gap-1 border-b bg-card py-1",
         compact
           ? "flex-nowrap overflow-x-auto px-1.5"
           : // Wrap below md; scroll a single row at md+ so tablets reach every menu (#871).
             "flex-wrap px-2 md:flex-nowrap md:overflow-x-auto",
       )}
     >
-      <span className="me-1 flex shrink-0 items-center gap-1.5 text-sm font-semibold text-primary md:me-2">
-        <Map className="h-4 w-4" />
-        {showProjectInfo ? <span className="hidden sm:inline">{appTitle}</span> : null}
-      </span>
+      <BrandMark showName={showProjectInfo} />
       {!viewer && isMenuVisible(uiProfile, "project") && (
         <ProjectMenu
           chrome={chrome}

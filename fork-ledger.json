@@ -1,4 +1,53 @@
 {
   "$comment": "Seam ledger — every upstream file this fork modifies, with why. See FORK.md §3. Checked by scripts/check-fork-divergence.mjs. Seams are divergence we carry knowingly at every upstream sync (standing rule: contributions upstream are the exception, decided by Matthieu, and only for what genuinely serves GeoLibre); keep them rare and small.",
-  "seams": []
+  "seams": [
+    {
+      "path": "apps/geolibre-desktop/index.html",
+      "reason": "branding-v1: tab title, apple-mobile-web-app-title, description, theme-color -> Geospatial Studio"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/components/layout/TopToolbar.tsx",
+      "reason": "branding-v1: brand block -> <BrandMark/> (src/branding/), ds-topbar class for the all-caps menu voice"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/index.css",
+      "reason": "branding-v1: one @import of src/branding/branding.css (fonts, dark surfaces, top-bar typography)"
+    },
+    {
+      "path": "apps/geolibre-desktop/vite.config.ts",
+      "reason": "branding-v1: PWA manifest name/short_name/description/theme_color -> Geospatial Studio"
+    },
+    {
+      "path": "e2e/pwa.spec.ts",
+      "reason": "branding-v1: manifest.name assertion follows the rebrand"
+    },
+    {
+      "path": "apps/geolibre-desktop/public/favicon.png",
+      "reason": "branding-v1: asset swap — D lettermark tab icon (32px)"
+    },
+    {
+      "path": "apps/geolibre-desktop/public/favicon.ico",
+      "reason": "branding-v1: asset swap — D lettermark tab icon (32+48px ICO)"
+    },
+    {
+      "path": "packages/core/src/types.ts",
+      "reason": "branding-v1: DEFAULT_BASEMAP -> OpenFreeMap Dark (was styles/liberty). The product's standard view is 2D on a dark basemap."
+    },
+    {
+      "path": "apps/geolibre-desktop/src/hooks/useDesktopSettings.ts",
+      "reason": "branding-v1: empty-workspace projection defaults to 2D — DEFAULT_STARTUP_SETTINGS.globeByDefault and the normalize fallback both -> false (was true/globe)."
+    },
+    {
+      "path": "tests/startup-project-settings.test.ts",
+      "reason": "branding-v1: startup projection assertions follow the 2D default (globeByDefault false -> mercator)."
+    },
+    {
+      "path": "tests/qgis-project-import.test.ts",
+      "reason": "branding-v1: built-in basemap substitution assertion follows DEFAULT_BASEMAP -> dark."
+    },
+    {
+      "path": "e2e/storymap.spec.ts",
+      "reason": "branding-v1: exported-story projection assertion follows the 2D default (globe -> mercator)."
+    }
+  ]
 }

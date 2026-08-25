@@ -49,7 +49,10 @@ export const PROTOMAPS_BASEMAPS = [
   { id: "protomaps-black", name: "Black", flavor: "black" },
 ] as const;
 
-export const DEFAULT_BASEMAP = "https://tiles.openfreemap.org/styles/liberty";
+// branding-v1 (Geospatial Studio): default basemap is OpenFreeMap Dark, not
+// Liberty. Ledgered fork seam — the product's standard view is 2D on a dark
+// basemap. Upstream default was ".../styles/liberty".
+export const DEFAULT_BASEMAP = "https://tiles.openfreemap.org/styles/dark";
 
 export const BLANK_BASEMAP = "";
 

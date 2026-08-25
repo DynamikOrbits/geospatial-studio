@@ -95,11 +95,15 @@ test("persists a story map across save and reopen", async ({ page }) => {
 });
 
 /**
- * #917: the exported HTML must render in the same projection as the app (globe
- * by default), not 2D Mercator. #921: with no native save picker, exporting
- * must prompt for a file name first instead of auto-downloading a default.
+ * #917: the exported HTML must render in the SAME projection as the app, not a
+ * hardcoded one. branding-v1 (Geospatial Studio) makes the app default to 2D
+ * Mercator, so a story exported from the untouched default carries mercator;
+ * upstream defaulted to globe and asserted that here. Globe projection
+ * persistence itself stays covered by tests/globe-control-toggle.test.ts. #921:
+ * with no native save picker, exporting must prompt for a file name first
+ * instead of auto-downloading a default.
  */
-test("exports the story as a globe HTML page after a name prompt", async ({ page }) => {
+test("exports the story in the app projection after a name prompt", async ({ page }) => {
   await page.addInitScript(() => {
     delete (window as unknown as Record<string, unknown>).showSaveFilePicker;
   });
@@ -124,8 +128,9 @@ test("exports the story as a globe HTML page after a name prompt", async ({ page
   for await (const chunk of stream) chunks.push(Buffer.from(chunk));
   const html = Buffer.concat(chunks).toString("utf8");
 
-  // The exported page must carry and apply the globe projection (#917).
-  expect(html).toMatch(/"projection":\s*"globe"/);
+  // The exported page must carry and apply the app's projection (#917). The
+  // app now defaults to 2D, so the untouched default exports mercator.
+  expect(html).toMatch(/"projection":\s*"mercator"/);
   expect(html).toMatch(/setProjection\(\{ type: config\.projection/);
 });
 

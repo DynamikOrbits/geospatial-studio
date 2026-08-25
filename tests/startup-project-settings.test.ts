@@ -13,11 +13,13 @@ import {
 
 describe("startup project settings", () => {
   it("defaults to the normal untitled workspace", () => {
+    // branding-v1 (Geospatial Studio): standard view is 2D, so globeByDefault
+    // defaults to false. Upstream expected true.
     assert.deepEqual(normalizeDesktopSettings({}).startup, {
       mode: "default",
       projectPath: null,
       projectName: null,
-      globeByDefault: true,
+      globeByDefault: false,
     });
   });
 
@@ -40,11 +42,13 @@ describe("startup project settings", () => {
     );
   });
 
-  it("defaults invalid or missing empty-workspace projection settings to globe", () => {
-    assert.equal(normalizeDesktopSettings({ startup: {} }).startup.globeByDefault, true);
+  it("defaults invalid or missing empty-workspace projection settings to 2D", () => {
+    // branding-v1 (Geospatial Studio): the product default is 2D, so a missing
+    // or invalid globeByDefault normalizes to false. Upstream defaulted to true.
+    assert.equal(normalizeDesktopSettings({ startup: {} }).startup.globeByDefault, false);
     assert.equal(
       normalizeDesktopSettings({ startup: { globeByDefault: "no" } }).startup.globeByDefault,
-      true,
+      false,
     );
   });
 
@@ -62,10 +66,12 @@ describe("startup project settings", () => {
 
 describe("startupDefaultProjection", () => {
   it("uses the empty-workspace globe preference", () => {
-    assert.equal(startupDefaultProjection(DEFAULT_STARTUP_SETTINGS), "globe");
+    // branding-v1 (Geospatial Studio): DEFAULT_STARTUP_SETTINGS is 2D now, so
+    // the plain default resolves to mercator; opting into the globe gives globe.
+    assert.equal(startupDefaultProjection(DEFAULT_STARTUP_SETTINGS), "mercator");
     assert.equal(
-      startupDefaultProjection({ ...DEFAULT_STARTUP_SETTINGS, globeByDefault: false }),
-      "mercator",
+      startupDefaultProjection({ ...DEFAULT_STARTUP_SETTINGS, globeByDefault: true }),
+      "globe",
     );
   });
 });
@@ -121,6 +127,8 @@ describe("planStartup", () => {
 
   it("falls back to the empty workspace when no project resolves", () => {
     // "Reopen the last project" with an empty history, and the default mode.
+    // branding-v1 (Geospatial Studio): DEFAULT_STARTUP_SETTINGS is 2D, so the
+    // empty-workspace fallback projects mercator. Upstream expected globe.
     assert.deepEqual(
       planStartup({
         explicitPayload: false,
@@ -128,7 +136,7 @@ describe("planStartup", () => {
         settings: { ...DEFAULT_STARTUP_SETTINGS, mode: "last" },
         recentProjects: [],
       }),
-      { kind: "default", projection: "globe" },
+      { kind: "default", projection: "mercator" },
     );
     assert.deepEqual(
       planStartup({

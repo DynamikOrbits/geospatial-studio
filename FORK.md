@@ -101,14 +101,20 @@ contribution is simple: **who does it serve?**
 
 ## 6. Branding and identity
 
-Progressive, and never by repainting upstream components:
+Progressive, and never by repainting upstream components. (Corrected
+2026-08-21: UI Profiles turned out to be pure feature/menu gating — they
+cannot carry a name, logo, or title — so branding is done with a small set of
+ledgered seams plus our own files, which is the honest cost.)
 
-1. **Now**: name, logo, icons, window/tab title, About text — via UI Profiles
-   and asset substitution from our own `branding/` files.
-2. **Then**: color tokens / theme aligned with the DKO design system through
-   the theming surface GeoLibre already exposes.
-3. **Only if ever needed**: deeper chrome changes as ledgered seams — each one
-   justified, because every one taxes every future sync.
+1. **Identity**: tab title/meta (`index.html`), the top-bar `<BrandMark/>`
+   (our `src/branding/` module behind a one-line seam in TopToolbar), favicon
+   asset swaps, PWA manifest fields — each a ledger entry.
+2. **Theme**: fonts and color tokens override upstream's `@layer`ed tokens
+   from our unlayered `src/branding/branding.css`, loaded through a single
+   `@import` seam in `index.css`. Accent schemes (`data-theme`) are
+   upstream's and stay untouched.
+3. **Deeper chrome changes only if ever needed** — each one justified,
+   because every one taxes every future sync.
 
 ## 7. Where product architecture lives
 
