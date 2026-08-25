@@ -27,7 +27,13 @@ import traitlets
 
 from . import authoring as _authoring
 from . import project as _project
-from ._server import app_port, register_local_file, serve_app, unregister_local_file
+from ._server import (
+    app_port,
+    register_local_file,
+    register_raster_tiles,
+    serve_app,
+    unregister_local_file,
+)
 from .basemaps import resolve_basemap
 from .polyline import polyline_to_geojson
 
@@ -1666,6 +1672,7 @@ class Map(anywidget.AnyWidget):
         *,
         tile_size: int = 256,
         attribution: str | None = None,
+        bounds: list[float] | None = None,
         **style: Any,
     ) -> str:
         """Add a raster XYZ tile layer.
@@ -1675,6 +1682,7 @@ class Map(anywidget.AnyWidget):
             name: Layer display name.
             tile_size: Tile size in pixels.
             attribution: Optional attribution string.
+            bounds: Optional ``[west, south, east, north]`` request bounds.
             **style: Style overrides.
 
         Returns:
@@ -1686,6 +1694,7 @@ class Map(anywidget.AnyWidget):
                 url,
                 tile_size=tile_size,
                 attribution=attribution,
+                bounds=bounds,
                 **style,
             )
         )
@@ -1869,7 +1878,7 @@ class Map(anywidget.AnyWidget):
 
     def add_cog(
         self,
-        url: str,
+        url: str | os.PathLike[str],
         name: str = "COG",
         *,
         bands: list[int] | None = None,
@@ -1884,9 +1893,12 @@ class Map(anywidget.AnyWidget):
                 kernel host. A local file is served by the bundled static server
                 so the app can read it; that URL lives only for this kernel
                 session, so a project saved with a local raster will not restore
-                the raster when reopened later, and the file is only reachable
-                when the browser runs on the same host as the kernel (local
-                Jupyter, VS Code).
+                the raster when reopened later. It is read directly in local
+                Jupyter and VS Code. Colab renders it as PNG XYZ tiles in the
+                kernel instead, and JupyterHub can route it through the kernel
+                port when ``jupyter-server-proxy`` is available; a deployment
+                that can only serve the app extension cannot expose kernel
+                files, so pass a hosted URL there.
             name: Layer display name.
             bands: Optional 1-based band indices to render.
             colormap: Optional colormap name (single-band rendering).
@@ -1896,6 +1908,34 @@ class Map(anywidget.AnyWidget):
         Returns:
             The id of the added layer.
         """
+        if self._running_on_colab() and not (
+            isinstance(url, str) and url.startswith(("http://", "https://"))
+        ):
+            # Resolve once so rasterio sees the same file the tile route
+            # registered; GDAL does not expand "~" on its own.
+            local_path = pathlib.Path(url).expanduser().resolve()
+            tile_url = register_raster_tiles(
+                local_path,
+                bands=bands,
+                colormap=colormap,
+                rescale=rescale,
+            )
+            try:
+                import rasterio
+                from rasterio.warp import transform_bounds
+
+                with rasterio.open(local_path) as dataset:
+                    bounds = list(
+                        transform_bounds(
+                            dataset.crs,
+                            "EPSG:4326",
+                            *dataset.bounds,
+                            densify_pts=21,
+                        )
+                    )
+            except Exception:  # pragma: no cover - tile renderer reports invalid rasters
+                bounds = None
+            return self.add_tile_layer(tile_url, name, bounds=bounds, **style)
         return self._add_layer(
             _project.cog_layer(
                 name,
@@ -1965,7 +2005,8 @@ class Map(anywidget.AnyWidget):
             raise TypeError("add_raster() missing required argument: 'source'")
 
         raster_source = source
-        if not isinstance(source, (str, os.PathLike)):
+        is_xarray = not isinstance(source, (str, os.PathLike))
+        if is_xarray:
             raster_source = self._materialize_xarray(source, array_args)
         elif array_args:
             warnings.warn(

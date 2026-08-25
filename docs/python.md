@@ -27,12 +27,12 @@ conda install -c conda-forge geolibre
 ```
 
 Optional extras provide GeoPandas/Shapely support for GeoDataFrames and local
-vector files, plus xarray/rioxarray/rasterio support for in-memory rasters:
+vector files, plus xarray/rioxarray/rasterio/rio-tiler support for in-memory rasters:
 
 ```bash
 pip install "geolibre[all]"      # both
 pip install "geolibre[vector]"   # GeoPandas/Shapely only
-pip install "geolibre[raster]"   # xarray/rioxarray/rasterio only
+pip install "geolibre[raster]"   # xarray/rioxarray/rasterio/rio-tiler only
 ```
 
 `[all]` is the union of the two, so it now installs rasterio (and GDAL with it);
@@ -86,11 +86,14 @@ the app's own Earth Engine panel manages.
 
 `add_raster` / `add_cog` also accept a **local** GeoTIFF path on the kernel host:
 the file is served by the bundled localhost server so the app can read it. This
-only works where the **browser can reach the kernel's localhost** (local Jupyter,
-VS Code); on remote/browser-separated setups (Colab, JupyterHub, remote servers)
-the localhost route is unreachable, so pass a hosted URL there. The served URL is
-also session-scoped, so a project saved with a local raster will not restore it
-when reopened later — pass a hosted URL for durable projects.
+works directly in local Jupyter and VS Code. In Google Colab, where the kernel
+proxy does not preserve the byte-range semantics required by browser COG
+rendering, GeoLibre renders local rasters as PNG XYZ tiles in the kernel instead.
+JupyterHub can route the COG through the kernel port when
+`jupyter-server-proxy` is available. A static-server-extension-only deployment
+cannot expose kernel files, so pass a hosted URL there. The served URL is
+session-scoped, so a project saved with a local raster will not restore it when
+reopened later — pass a hosted URL for durable projects.
 
 Install `geolibre[raster]` to visualize an in-memory xarray object. Spatial
 dimensions named `lon`/`lat` or `longitude`/`latitude` default to EPSG:4326;
@@ -108,6 +111,8 @@ m.add_raster(
 
 The temporary Cloud-Optimized GeoTIFF backing an xarray layer is removed when the widget is
 closed, so xarray layers have the same session-only limitation as local files.
+Locally the browser reads that COG directly; in Colab rio-tiler renders it into
+ordinary PNG XYZ tiles to avoid Colab's incompatible byte-range proxy behavior.
 Call `m.close()` when you are done to remove it promptly; otherwise it is removed
 when the `Map` is garbage collected or when the kernel exits normally. A kernel
 that is killed outright leaves the file behind in the system temp directory.
