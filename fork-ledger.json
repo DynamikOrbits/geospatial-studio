@@ -2,6 +2,10 @@
   "$comment": "Seam ledger — every upstream file this fork modifies, with why. See FORK.md §3. Checked by scripts/check-fork-divergence.mjs. Seams are divergence we carry knowingly at every upstream sync (standing rule: contributions upstream are the exception, decided by Matthieu, and only for what genuinely serves GeoLibre); keep them rare and small.",
   "seams": [
     {
+      "path": "README.md",
+      "reason": "branding-v1: fork README — presents Geospatial Studio, states and links the GeoLibre parentage, keeps upstream's useful links attributed to GeoLibre; upstream's README describes their distribution channels (stores, PyPI, hosted apps), not this repo."
+    },
+    {
       "path": "apps/geolibre-desktop/index.html",
       "reason": "branding-v1: tab title, apple-mobile-web-app-title, description, theme-color -> Geospatial Studio"
     },
