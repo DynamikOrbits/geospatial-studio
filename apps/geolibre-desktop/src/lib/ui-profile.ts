@@ -804,7 +804,7 @@ export const MENU_ITEM_CATALOG: readonly MenuItemCatalogEntry[] = [
     labelKey: "toolbar.command.checkForUpdates",
     tier: "intermediate",
   },
-  { id: "help.about", menuId: "help", labelKey: "toolbar.command.about", tier: "basic" },
+  { id: "help.about", menuId: "help", labelKey: "about.productTitle", tier: "basic" },
 ];
 
 /** Group order + header label key for the per-menu item checklists in Settings. */
