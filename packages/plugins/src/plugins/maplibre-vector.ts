@@ -491,12 +491,25 @@ export function replayVectorLayer(
   } = {},
 ): Promise<unknown> {
   const effective = effectiveLayerRenderState(layer, groups);
+  const replayState = savedVectorState(layer);
+  // Embedded data and desktop-native reads are already materialized as
+  // GeoJSON, even when they came from a GeoPackage or another source format.
+  // The effective replay format must follow the data being passed to addData,
+  // not the original file format retained in the project metadata.
+  if (
+    typeof source !== "string" &&
+    (source.type === "FeatureCollection" ||
+      (source instanceof File &&
+        (source.type === "application/geo+json" || /\.geojson$/i.test(source.name))))
+  ) {
+    replayState.format = "geojson";
+  }
   // Record the folded values before addData so its first layer event is treated
   // as a restore echo rather than as an edit to the child's own state.
   rememberControlVectorRenderState(layer.id, effective);
   return control
     .addData(source, {
-      ...savedVectorState(layer),
+      ...replayState,
       ...(options.companionFiles?.length ? { companionFiles: options.companionFiles } : {}),
       ...(options.localPath ? { sourcePath: options.localPath } : {}),
       fitBounds: false,
@@ -749,6 +762,12 @@ function createVectorControl(
     // The panel doubles as the Add Vector Layer dialog, so it stays open
     // until the user closes it; clicking the map must not collapse it.
     closeOnOutsideClick: false,
+    // The control's own attribute popup defaults to on upstream, so a click on
+    // a feature opened its unstyled table alongside whatever the layer's Popup
+    // design says. GeoLibre owns feature popups (the Style panel's Popup
+    // section, issue #2113), so the picker is opt-in here: the panel's Popup
+    // checkbox starts clear and per-layer `picker` still turns it on.
+    enablePicker: false,
     // Desktop routes arbitrary remote datasets through its guarded native
     // downloader, bypassing WebView CORS. The browser build leaves this unset.
     ...(app.fetchVectorUrl ? { urlLoader: app.fetchVectorUrl } : {}),

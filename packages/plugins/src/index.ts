@@ -67,8 +67,10 @@ export {
 } from "./plugins/maplibre-basemap-control";
 export {
   addArcGISLayer,
+  fetchArcGISImageServiceRasterFunctions,
   fetchArcGISMapServiceSublayers,
   ARCGIS_FEATURE_SOURCE_KIND,
+  ARCGIS_IMAGE_SERVICE_URL_ERROR,
   ARCGIS_IMAGE_SERVICE_SOURCE_KIND,
   ARCGIS_LAYER_TYPES,
   ARCGIS_MAP_SERVICE_SOURCE_KIND,
@@ -78,6 +80,7 @@ export {
   reloadArcGISViewportLayer,
   restoreArcGISViewportLayers,
   type ArcGISLayerOptions,
+  type ArcGISImageServiceRasterFunction,
   type ArcGISLayerType,
   type ArcGISMapServiceSublayer,
   type ArcGISSourceType,
@@ -574,6 +577,12 @@ export {
 export { maplibreNationalMapPlugin } from "./plugins/maplibre-national-map";
 export { maplibreOvertureMapsPlugin } from "./plugins/maplibre-overture-maps";
 export { maplibreStreetViewPlugin } from "./plugins/maplibre-streetview";
+export {
+  maplibreSamGeoPlugin,
+  SAMGEO_PLUGIN_ID,
+  setSamGeoLabels,
+  type SamGeoLabels,
+} from "./plugins/maplibre-samgeo";
 export {
   maplibreMapillaryPlugin,
   MAPILLARY_PLUGIN_ID,

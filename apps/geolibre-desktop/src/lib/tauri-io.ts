@@ -1,4 +1,5 @@
 import {
+  batchDecodePolylines,
   hasPathTraversal,
   isAbsoluteFilesystemPath,
   parseProject,
@@ -19,7 +20,7 @@ import {
 } from "@tauri-apps/plugin-fs";
 import type { StartupSettings } from "../hooks/useDesktopSettings";
 import { unzip } from "fflate";
-import type { FeatureCollection } from "geojson";
+import type { Feature, FeatureCollection } from "geojson";
 import i18next from "i18next";
 import { combine, parseDbf, parseShp } from "shpjs";
 import {
@@ -58,6 +59,7 @@ import { parseGpxLayer } from "./gpx";
 import { isTauri } from "./is-tauri";
 import { SHAPEFILE_COMPANION_EXTENSIONS, shapefileCompanionPathsFromSelection } from "./mas-build";
 import {
+  KML_FOLDER_PATH_PROPERTY,
   parseKmlGroundOverlays,
   parseKmlModels,
   parseKmlText,
@@ -272,6 +274,8 @@ export interface LoadedVectorLayer {
   data: FeatureCollection;
   name?: string;
   path: string;
+  /** Enclosing KML Folder names, reconstructed as nested layer groups. */
+  groupPath?: string[];
 }
 
 /**
@@ -475,6 +479,61 @@ function mergeFeatureCollections(collections: FeatureCollection[]): FeatureColle
   };
 }
 
+/**
+ * Split folder-aware KML placemarks into layers that can occupy distinct groups.
+ *
+ * Only placemarks that actually sit inside a `<Folder>` become their own layer;
+ * everything else stays merged into a single layer, as it was before folder
+ * support. A real-world export is often a handful of foldered placemarks among
+ * hundreds of flat ones, and splitting those too would turn one cheap layer add
+ * into hundreds of store mutations and layer-panel rows.
+ */
+export function splitKmlFolderLayers(
+  collection: FeatureCollection,
+  path: string,
+): LoadedVectorLayer[] {
+  const hasFolderMetadata = collection.features.some((feature) =>
+    Array.isArray(feature.properties?.[KML_FOLDER_PATH_PROPERTY]),
+  );
+  if (!hasFolderMetadata) return [{ data: collection, path }];
+
+  const layers: LoadedVectorLayer[] = [];
+  // Placemarks outside any Folder, gathered into the one merged layer below.
+  const ungrouped: Feature[] = [];
+  collection.features.forEach((feature, index) => {
+    const properties = { ...(feature.properties ?? {}) };
+    const rawPath = properties[KML_FOLDER_PATH_PROPERTY];
+    delete properties[KML_FOLDER_PATH_PROPERTY];
+    const groupPath = Array.isArray(rawPath)
+      ? rawPath.filter((part): part is string => typeof part === "string" && part.trim() !== "")
+      : [];
+    const stripped: Feature = { ...feature, properties };
+    if (groupPath.length === 0) {
+      ungrouped.push(stripped);
+      return;
+    }
+    const name =
+      typeof properties.name === "string" && properties.name.trim() !== ""
+        ? properties.name
+        : `Placemark ${index + 1}`;
+    layers.push({
+      data: { type: "FeatureCollection", features: [stripped] },
+      name,
+      path,
+      groupPath,
+    });
+  });
+
+  // Store insertion is top-first, so feed placemarks in reverse document order
+  // to keep their visible layer/group order aligned with Google Earth. The
+  // merged ungrouped layer is added first so it settles below the folders.
+  layers.reverse();
+  if (ungrouped.length > 0) {
+    layers.unshift({ data: { type: "FeatureCollection", features: ungrouped }, path });
+  }
+  return layers;
+}
+
 function normalizeShapefileResult(value: unknown): FeatureCollection {
   if (Array.isArray(value)) {
     return mergeFeatureCollections(value.map(assertFeatureCollection));
@@ -639,6 +698,91 @@ function parseGpxTextLayers(text: string, path: string): LoadedVectorLayer[] {
       name: `${baseName} ${layer.label}`,
       path,
     }));
+}
+
+/**
+ * Checks whether a decoded polyline FeatureCollection contains valid, non-empty WGS84 coordinates.
+ *
+ * Rejects collections with no features or 0 total coordinates, non-finite values,
+ * or coordinate values falling outside the valid WGS84 domain ([-180, 180] lon, [-90, 90] lat).
+ */
+function hasValidPolylineCoordinates(fc: FeatureCollection): boolean {
+  if (!fc.features || fc.features.length === 0) return false;
+  let totalPoints = 0;
+  for (const feature of fc.features) {
+    const geometry = feature.geometry;
+    if (!geometry) continue;
+    if (geometry.type === "LineString") {
+      for (const coord of geometry.coordinates) {
+        const [lon, lat] = coord;
+        if (
+          !Number.isFinite(lon) ||
+          !Number.isFinite(lat) ||
+          lon < -180 ||
+          lon > 180 ||
+          lat < -90 ||
+          lat > 90
+        ) {
+          return false;
+        }
+        totalPoints++;
+      }
+    } else if (geometry.type === "MultiLineString") {
+      for (const line of geometry.coordinates) {
+        for (const coord of line) {
+          const [lon, lat] = coord;
+          if (
+            !Number.isFinite(lon) ||
+            !Number.isFinite(lat) ||
+            lon < -180 ||
+            lon > 180 ||
+            lat < -90 ||
+            lat > 90
+          ) {
+            return false;
+          }
+          totalPoints++;
+        }
+      }
+    }
+  }
+  return totalPoints > 0;
+}
+
+/**
+ * Parses raw polyline text from a dropped/opened file into a vector layer.
+ *
+ * Encoded polyline format does not self-describe its precision factor. Auto-detection
+ * first attempts standard precision 5 (Google Maps / OSRM standard, factor 1e5).
+ * If precision 5 yields coordinates outside valid WGS84 bounds (which occurs when
+ * precision 6 data with latitude > 9° or longitude > 18° is scaled up by 10x),
+ * it falls back to precision 6 (Valhalla / Mapbox standard, factor 1e6).
+ *
+ * That bounds check only settles the cases it can: the two decodes of the same
+ * bytes differ by exactly a factor of 10, so whenever precision 5 lands in
+ * bounds precision 6 necessarily does too, and nothing in the data says which
+ * one the author meant. Precision-6 data close to the prime meridian and the
+ * equator (|lon| <= 18°, |lat| <= 9°) therefore imports at precision 5, ten
+ * times too large, with no error. Drag-and-drop has nowhere to ask, so it takes
+ * the more common of the two; Add Data → Encoded Polyline is the path with an
+ * explicit precision picker and a preview to check the result against.
+ */
+function parsePolylineFileLayers(text: string, path: string): LoadedVectorLayer[] {
+  let fc = batchDecodePolylines(text, { precision: 5, unescape: true });
+  if (!hasValidPolylineCoordinates(fc)) {
+    fc = batchDecodePolylines(text, { precision: 6, unescape: true });
+  }
+  if (!hasValidPolylineCoordinates(fc)) {
+    throw new Error("No valid polyline coordinates could be decoded from this file.");
+  }
+  const baseName = pathWithoutExtension(browserSafeFileName(path)) || "Polyline";
+  return [
+    {
+      data: fc,
+      name: baseName,
+      path,
+    },
+  ];
 }
 
 /** Delimited text formats the drag-and-drop / open path loads as points. */
@@ -887,7 +1031,9 @@ async function loadShapefileZip(
   }
   if (shouldRouteToDuckDb(unzipped.file.data.byteLength)) {
     console.info(
-      `[GeoLibre] "${unzipped.file.name}" is ${Math.round(unzipped.file.data.byteLength / (1024 * 1024))} MB uncompressed; reading it with DuckDB instead of shpjs to keep the parse off the main thread.`,
+      `[GeoLibre] "${unzipped.file.name}" is ${Math.round(
+        unzipped.file.data.byteLength / (1024 * 1024),
+      )} MB uncompressed; reading it with DuckDB instead of shpjs to keep the parse off the main thread.`,
     );
     return loadDuckDbVector(unzipped.file, options);
   }
@@ -1390,9 +1536,9 @@ async function fetchDaeAsGlbDataUrl(href: string): Promise<{
     const daeBytes = new Blob([daeText]).size;
     if (daeBytes > MAX_DAE_SOURCE_BYTES) {
       console.warn(
-        `Skipping a KML model: "${href}" is ${Math.round(daeBytes / (1024 * 1024))} MB, over the ${Math.round(
-          MAX_DAE_SOURCE_BYTES / (1024 * 1024),
-        )} MB limit.`,
+        `Skipping a KML model: "${href}" is ${Math.round(
+          daeBytes / (1024 * 1024),
+        )} MB, over the ${Math.round(MAX_DAE_SOURCE_BYTES / (1024 * 1024))} MB limit.`,
       );
       return null;
     }
@@ -1591,7 +1737,9 @@ async function loadKmzLayers(
             entries,
             options,
           );
-          if (features.features.length > 0) layers.push({ data: features, path });
+          if (features.features.length > 0) {
+            layers.push(...splitKmlFolderLayers(features, path));
+          }
         } catch (error) {
           // Declining the oversized-vector prompt must not throw away the
           // pyramid, which is already registered and loads on its own.
@@ -1627,7 +1775,7 @@ async function loadKmzLayers(
   let cancellation: unknown;
   try {
     const features = await kmzVectorFeatures(kmlFiles, entries, options);
-    if (features.features.length > 0) layers.push({ data: features, path });
+    if (features.features.length > 0) layers.push(...splitKmlFolderLayers(features, path));
   } catch (error) {
     if (!isVectorLoadCancelled(error)) throw error;
     cancellation = error;
@@ -1941,7 +2089,9 @@ async function loadBrowserVectorFile(
   // route here would be misleading for a container near the threshold.
   if (streamViaDuckDb && ROUTABLE_TEXT_EXTENSIONS.has(extension)) {
     console.info(
-      `[GeoLibre] "${file.name}" is ${Math.round(file.size / (1024 * 1024))} MB; streaming it through DuckDB instead of the in-memory reader.`,
+      `[GeoLibre] "${file.name}" is ${Math.round(
+        file.size / (1024 * 1024),
+      )} MB; streaming it through DuckDB instead of the in-memory reader.`,
     );
   }
 
@@ -1987,6 +2137,15 @@ async function loadBrowserVectorFile(
   if (extension === "gpx") {
     return {
       data: parseGpxText(await file.text()),
+      path: file.name,
+    };
+  }
+
+  if (extension === "polyline") {
+    const text = await file.text();
+    const [layer] = parsePolylineFileLayers(text, file.name);
+    return {
+      data: layer.data,
       path: file.name,
     };
   }
@@ -2191,6 +2350,7 @@ async function tryLoadPickedNativeVectorPath(
     extension === "kml" ||
     extension === "kmz" ||
     extension === "gpx" ||
+    extension === "polyline" ||
     extension === "zip"
   ) {
     return undefined;
@@ -2226,7 +2386,9 @@ async function loadTauriVectorFile(
   // See `loadBrowserVectorFile`: containers decide their own routing later.
   if (streamViaDuckDb && ROUTABLE_TEXT_EXTENSIONS.has(extension)) {
     console.info(
-      `[GeoLibre] "${browserSafeFileName(path)}" is ${Math.round((sizeBytes ?? 0) / (1024 * 1024))} MB; streaming it through DuckDB instead of the in-memory reader.`,
+      `[GeoLibre] "${browserSafeFileName(path)}" is ${Math.round(
+        (sizeBytes ?? 0) / (1024 * 1024),
+      )} MB; streaming it through DuckDB instead of the in-memory reader.`,
     );
   }
 
@@ -2283,6 +2445,20 @@ async function loadTauriVectorFile(
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Unknown error";
       throw new Error(`Could not read this GPX file. ${detail}`);
+    }
+  }
+
+  if (extension === "polyline") {
+    try {
+      const text = await readLocalFileText(path);
+      const [layer] = parsePolylineFileLayers(text, path);
+      return {
+        data: layer.data,
+        path,
+      };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown error";
+      throw new Error(`Could not read this Polyline file. ${detail}`);
     }
   }
 
@@ -2612,6 +2788,49 @@ export async function openLocalDataFileWithFallback(options: LocalDataFileOption
   });
 }
 
+/** Open a multi-file picker and read every selected file as bytes. */
+export async function openLocalDataFilesWithFallback(
+  options: LocalDataFileOptions,
+): Promise<Array<{ data: ArrayBuffer; path: string }>> {
+  if (isTauri()) {
+    const selected = await open({
+      multiple: true,
+      filters: nativeFileDialogFilters(options.filters, options.androidFilters),
+    });
+    const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+    return Promise.all(
+      paths.map(async (path) => ({
+        data: toArrayBuffer(await readFile(path)),
+        path,
+      })),
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.accept = options.accept;
+    input.onchange = async () => {
+      try {
+        const files = Array.from(input.files ?? []);
+        resolve(
+          await Promise.all(
+            files.map(async (file) => ({
+              data: await file.arrayBuffer(),
+              path: file.name,
+            })),
+          ),
+        );
+      } catch (error) {
+        reject(error);
+      }
+    };
+    input.addEventListener("cancel", () => resolve([]));
+    input.click();
+  });
+}
+
 export async function pickLocalPathWithFallback(
   options: PickLocalPathOptions = {},
 ): Promise<string | null> {
@@ -2628,6 +2847,19 @@ export async function pickLocalPathWithFallback(
   // require a real path. Return null so callers surface the desktop-only
   // message rather than passing a non-resolvable bare file name.
   return null;
+}
+
+/** Pick several native filesystem paths (desktop only). */
+export async function pickLocalPathsWithFallback(
+  options: PickLocalPathOptions = {},
+): Promise<string[]> {
+  if (!isTauri()) return [];
+  const selected = await open({
+    directory: options.directory ?? false,
+    filters: options.filters,
+    multiple: true,
+  });
+  return Array.isArray(selected) ? selected : selected ? [selected] : [];
 }
 
 /**
@@ -2771,13 +3003,18 @@ export class RecentProjectGoneError extends Error {
  */
 const startupSnapshotIo: StartupSnapshotIo = {
   write: async (file, content) => {
-    await mkdir(STARTUP_SNAPSHOT_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
+    await mkdir(STARTUP_SNAPSHOT_DIR, {
+      baseDir: BaseDirectory.AppLocalData,
+      recursive: true,
+    });
     await writeTextFile(`${STARTUP_SNAPSHOT_DIR}/${file}`, content, {
       baseDir: BaseDirectory.AppLocalData,
     });
   },
   read: (file) =>
-    readTextFile(`${STARTUP_SNAPSHOT_DIR}/${file}`, { baseDir: BaseDirectory.AppLocalData }),
+    readTextFile(`${STARTUP_SNAPSHOT_DIR}/${file}`, {
+      baseDir: BaseDirectory.AppLocalData,
+    }),
 };
 
 /**
@@ -3109,6 +3346,11 @@ export async function loadDroppedVectorFiles(
         continue;
       }
 
+      if (extension === "polyline") {
+        layers.push(...parsePolylineFileLayers(await file.text(), file.name));
+        continue;
+      }
+
       if (extension === "kmz") {
         try {
           layers.push(...(await loadKmzLayers(await file.arrayBuffer(), file.name, options)));
@@ -3136,7 +3378,9 @@ export async function loadDroppedVectorFiles(
           // fallback for an overlay-only KML can return an empty collection, and
           // an empty vector layer alongside the overlay is just clutter.
           const vector = await loadBrowserVectorFile(file, [], options);
-          if (vector.data.features.length > 0) layers.push(vector);
+          if (vector.data.features.length > 0) {
+            layers.push(...splitKmlFolderLayers(vector.data, vector.path));
+          }
         } catch (error) {
           // Declining the oversized-vector prompt, or a genuine parse failure,
           // still leaves any ground overlays/models already added above (a real
@@ -3391,6 +3635,15 @@ export async function loadDroppedVectorPaths(
         }
         continue;
       }
+      if (extension === "polyline") {
+        try {
+          layers.push(...parsePolylineFileLayers(await readLocalFileText(path), path));
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          throw new Error(`Could not read this Polyline file. ${detail}`);
+        }
+        continue;
+      }
       if (extension === "kmz") {
         try {
           layers.push(...(await loadKmzLayers(await readLocalFileBytes(path), path, options)));
@@ -3415,7 +3668,9 @@ export async function loadDroppedVectorPaths(
           // Only add a vector layer when it actually has features (an overlay-only
           // KML's DuckDB fallback can return an empty collection).
           const vector = await loadTauriVectorFile(path, options);
-          if (vector.data.features.length > 0) layers.push(vector);
+          if (vector.data.features.length > 0) {
+            layers.push(...splitKmlFolderLayers(vector.data, vector.path));
+          }
         } catch (error) {
           // Declining the oversized-vector prompt, or a genuine parse failure,
           // still leaves any ground overlays/models already added above (a real

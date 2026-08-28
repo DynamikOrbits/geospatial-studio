@@ -338,6 +338,10 @@
       "video": {
         "label": "Aggiungi livello video",
         "description": "Aggiungi una sovrapposizione video georeferenziata fornendo un URL MP4 e le coordinate dei quattro angoli."
+      },
+      "polyline": {
+        "label": "Aggiungi livello polilinea codificata",
+        "description": "Importa stringhe di polilinea codificata (Google, OSRM, Valhalla) da testo o file come linee vettoriali."
       }
     },
     "shared": {
@@ -511,6 +515,14 @@
       "noSublayersFound": "Questo servizio mappa non ha dichiarato alcun livello.",
       "retrieveError": "Impossibile recuperare i livelli del servizio mappa.",
       "errorMapServiceUrl": "Inserisci un URL ArcGIS MapServer.",
+      "rasterFunction": "Funzione raster",
+      "serviceDefaultRasterFunction": "Predefinito del servizio",
+      "retrieveRasterFunctions": "Sfoglia funzioni",
+      "retrievingRasterFunctions": "Recupero in corso...",
+      "noRasterFunctionsFound": "Questo servizio immagini non ha dichiarato alcuna funzione raster.",
+      "retrieveRasterFunctionsError": "Impossibile recuperare le funzioni raster del servizio immagini.",
+      "errorImageServiceUrl": "Inserisci un URL ArcGIS ImageServer.",
+      "customRenderingRule": "Regola di rendering personalizzata",
       "renderingRule": "Regola di rendering",
       "renderingRulePlaceholder": "{\"rasterFunction\":\"Hillshade\"}",
       "renderingRuleHint": "JSON facoltativo di una funzione raster applicata dal servizio. Una regola di rendering disegna il servizio in modo dinamico anziché usare le sue tile in cache.",
@@ -687,7 +699,7 @@
       "errorConnectFirst": "Connettiti prima a PostgreSQL.",
       "errorNoVectorLayers": "La sorgente Martin selezionata non ha livelli vettoriali.",
       "errorSelectSource": "Seleziona una sorgente Martin da aggiungere.",
-      "desktopOnlyNotice": "I livelli PostgreSQL sono disponibili solo in GeoLibre Desktop. Questa funzione avvia un server di tile Martin locale, che l'app web non può eseguire.",
+      "desktopOnlyNotice": "I livelli PostgreSQL sono disponibili solo in GeoLibre Desktop. Questa funzione avvia un server di tile Martin locale, che le app web e mobile non possono eseguire.",
       "savedConnection": "Connessione salvata",
       "selectSavedConnection": "Seleziona connessione salvata",
       "connectionString": "Stringa di connessione PostgreSQL",
@@ -768,6 +780,47 @@
       "bottomRight": "In basso a destra (lng, lat)",
       "bottomLeft": "In basso a sinistra (lng, lat)",
       "cornersNote": "I quattro angoli georeferenziano il video sulla mappa. Il video deve essere servito tramite HTTPS e l'host deve consentire richieste cross-origin (CORS) affinché i fotogrammi vengano visualizzati."
+    },
+    "polyline": {
+      "defaultName": "Polilinea",
+      "modePaste": "Incolla testo",
+      "modeFile": "Scegli file",
+      "precisionLabel": "Precisione",
+      "precision5": "5 (Google / OSRM)",
+      "precision6": "6 (Valhalla / Mapbox)",
+      "unescapeLabel": "Rimuovi escape dalle barre rovesciate (\\\\ in \\)",
+      "delimiterLabel": "Delimitatore delle polilinee",
+      "delimNewline": "A capo (predefinito)",
+      "delimSemicolon": "Punto e virgola (;)",
+      "delimComma": "Virgola (,)",
+      "delimTab": "Tabulazione",
+      "delimCustom": "Delimitatore personalizzato",
+      "customDelimPlaceholder": "Delimitatore personalizzato (es. | o ---)",
+      "outputGeometryLabel": "Geometria di output",
+      "separateLines": "LineString separati",
+      "multiLineString": "Singolo MultiLineString",
+      "textLabel": "Stringa/e di polilinea codificata",
+      "placeholder": "Incolla la stringa di polilinea codificata (es. _p~iF~ps|U_ulLnnqC_mqNvxq`@)...",
+      "previewInfo": "Numero di linee decodificate: {{lines}}, numero totale di punti: {{points}}.",
+      "previewTitle": "Anteprima della geometria decodificata",
+      "previewExtent": "Estensione",
+      "previewLength": "Lunghezza",
+      "previewCoordinates": "Ispeziona coordinate",
+      "previewLine": "Linea",
+      "previewPoints": "punti",
+      "previewStart": "Inizio",
+      "previewEnd": "Fine",
+      "errorFileMissing": "Il file selezionato è vuoto o non può essere letto.",
+      "readError": "Impossibile leggere il file di polilinee.",
+      "errorChooseFile": "Scegli un file di polilinee da caricare.",
+      "errorEmptyInput": "Inserisci una o più stringhe di polilinea codificata.",
+      "errorNoValidLines": "Non è stato possibile decodificare alcuna coordinata di polilinea valida.",
+      "sampleGoogle": "Google / OSRM (precisione 5)",
+      "sampleValhalla": "Valhalla / Mapbox (precisione 6)",
+      "sampleEscaped": "Barre rovesciate con escape (formato stringa JSON)",
+      "sampleMultiLine": "Batch di percorsi multilinea (3 segmenti)",
+      "unitMeters": "{{value}} m",
+      "unitKm": "{{value}} km"
     },
     "netcdf": {
       "sampleLabel": "Temperatura dell'aria",
@@ -1847,6 +1900,7 @@
     "description": "Configura le preferenze del progetto e le impostazioni di runtime.",
     "saveButton": "Salva impostazioni",
     "section": {
+      "language": "Lingua",
       "map": "Mappa",
       "layout": "Layout",
       "appearance": "Aspetto",
@@ -1870,6 +1924,39 @@
       "managePlugins": "Gestisci plugin",
       "styleManager": "Gestione stili",
       "urlOverrideNote": "I parametri di layout nell'URL sostituiscono le impostazioni salvate."
+    },
+    "languagePack": {
+      "title": "Pacchetti lingua",
+      "description": "Aggiungi traduzioni facoltative per nomi degli strumenti, parametri e testi di aiuto di Whitebox senza appesantire ogni installazione di GeoLibre.",
+      "manage": "Gestisci i pacchetti lingua",
+      "interfaceLanguage": "Lingua dell'interfaccia",
+      "installed": "Pacchetto lingua Whitebox installato",
+      "notInstalled": "Nessun pacchetto lingua Whitebox installato",
+      "installedDetail": "{{source}} · installato il {{date}}",
+      "installedDetailNoDate": "{{source}} · installato",
+      "notInstalledDetail": "I metadati di elaborazione di Whitebox restano in inglese finché non scarichi o importi un pacchetto.",
+      "downloadsDisabled": "I download ufficiali sono disattivati in questa build. Importa invece un file di pacchetto lingua.",
+      "englishFallback": "Whitebox fornisce direttamente i propri metadati in inglese, quindi non serve alcun pacchetto aggiuntivo.",
+      "sourceOfficial": "Download ufficiale",
+      "sourceFile": "File importato",
+      "download": "Scarica pacchetto",
+      "importFile": "Importa file",
+      "remove": "Rimuovi pacchetto",
+      "downloaded": "Pacchetto lingua scaricato e applicato.",
+      "imported": "Pacchetto lingua per {{locale}} importato e applicato.",
+      "removed": "Pacchetto lingua rimosso. I metadati di Whitebox tornano in inglese.",
+      "privacy": "I pacchetti vengono archiviati solo su questo dispositivo. Il download di un pacchetto invia il codice della lingua a {{host}}, ma nessun dato del progetto.",
+      "privacyLocalOnly": "I pacchetti vengono archiviati solo su questo dispositivo. Questa build non scarica nulla: importa invece un file di pacchetto lingua.",
+      "browse": "Sfoglia i pacchetti lingua",
+      "errorInvalidJson": "Quel file non è un JSON valido.",
+      "errorInvalidFormat": "Quel file non è un pacchetto lingua Whitebox di GeoLibre valido.",
+      "errorUnsupportedVersion": "Questa versione del pacchetto lingua non è supportata da questa versione di GeoLibre.",
+      "errorInvalidLocale": "Il pacchetto lingua ha una locale non valida o imprevista.",
+      "errorUnsupportedLocale": "GeoLibre non include la lingua di base dell'interfaccia richiesta da questo pacchetto.",
+      "errorTooLarge": "Il pacchetto lingua supera il limite di sicurezza di 5 MB.",
+      "errorNotFound": "Non è ancora disponibile un pacchetto lingua Whitebox ufficiale per questa lingua.",
+      "errorDownload": "Non è stato possibile scaricare il pacchetto lingua. Controlla la connessione oppure importa un file locale.",
+      "errorGeneric": "Non è stato possibile installare il pacchetto lingua."
     },
     "updates": {
       "title": "Aggiornamenti software",
@@ -1900,6 +1987,13 @@
       "noProjectSelected": "Nessun progetto selezionato",
       "globeByDefault": "Abilita il globo 3D per impostazione predefinita",
       "globeByDefaultHint": "Usato per l'area di lavoro senza titolo quando non è indicato alcun progetto di avvio né un link a un progetto.",
+      "defaultView": "Vista della mappa predefinita",
+      "defaultViewHint": "Imposta il centro e lo zoom per lo spazio di lavoro senza titolo.",
+      "longitude": "Longitudine del centro",
+      "latitude": "Latitudine del centro",
+      "zoom": "Livello di zoom",
+      "useCurrentView": "Usa la vista corrente",
+      "viewUnavailable": "La vista corrente della mappa non è disponibile.",
       "selectError": "Impossibile leggere il progetto selezionato.",
       "restoring": "Apertura del progetto di avvio…",
       "loadWarning": "Il progetto di avvio non è disponibile. GeoLibre ha aperto l'area di lavoro predefinita."
@@ -2046,6 +2140,10 @@
       "osEnvNote": "L'app desktop legge anche le chiavi API corrispondenti dalle variabili d'ambiente del sistema. Queste vengono usate automaticamente e non vengono mai salvate nel file di progetto — lascia un campo vuoto per continuare a usare il valore dell'ambiente.",
       "osEnvField": "Letto dalla variabile d'ambiente di sistema {{name}}.",
       "osEnvPlaceholder": "Impostata nell'ambiente di sistema",
+      "refreshModels": "Aggiorna l'elenco dei modelli",
+      "modelsFailedToLoad": "Impossibile caricare i modelli: {{message}}",
+      "ollamaNetworkFailure": "Impossibile raggiungere il server Ollama. Verifica che sia in esecuzione a questo indirizzo e che OLLAMA_ORIGINS consenta l'origine di questa applicazione, oltre alle eventuali regole di firewall o proxy.",
+      "ollamaTimedOut": "La richiesta al server Ollama è scaduta. L'host potrebbe essere lento, irraggiungibile o bloccato da un firewall o da un proxy.",
       "newProfile": "Nuovo profilo",
       "cancel": "Annulla",
       "addProfile": "Aggiungi profilo",
@@ -2309,6 +2407,7 @@
       "delimitedText": "Livello di testo delimitato",
       "photos": "Foto geotaggate",
       "gpx": "Livello GPX",
+      "polyline": "Polilinea codificata",
       "mbtiles": "Livello MBTiles",
       "xyz": "Livello XYZ",
       "wms": "Livello WMS",
@@ -2409,6 +2508,8 @@
       "dissolve": "Dissolvi",
       "boundingBox": "Rettangolo di delimitazione",
       "simplify": "Semplifica",
+      "decodePolyline": "Decodifica polilinea",
+      "encodePolyline": "Codifica linea in polilinea",
       "clip": "Ritaglia",
       "intersection": "Intersezione",
       "difference": "Differenza",
@@ -2422,6 +2523,8 @@
       "explode": "Esplodi",
       "aggregate": "Aggrega per attributo",
       "smooth": "Smussa",
+      "extractVertices": "Estrai vertici",
+      "pointsAlongGeometry": "Punti lungo la geometria",
       "grid": "Griglia regolare",
       "voronoi": "Voronoi / Delaunay",
       "cellSectors": "Copertura delle celle radio",
@@ -2431,6 +2534,7 @@
       "trajectorySpeed": "Velocità di traiettoria",
       "detectStops": "Rileva soste",
       "spaceTimeProximity": "Prossimità spazio-temporale",
+      "mergeLayers": "Unisci livelli",
       "checkValidity": "Verifica validità",
       "fixGeometries": "Correggi geometrie",
       "checkTopologyRules": "Verifica regole topologiche",
@@ -2447,7 +2551,8 @@
       "getisOrd": "Hotspot Getis-Ord Gi*",
       "averageNearestNeighbor": "Vicino più prossimo medio",
       "kernelDensity": "Densità kernel (mappa di calore)",
-      "emergingHotSpot": "Hotspot emergenti (cubo spazio-tempo)"
+      "emergingHotSpot": "Hotspot emergenti (cubo spazio-tempo)",
+      "compositeScore": "Punteggio composito (indice di idoneità)"
     },
     "rasterTool": {
       "hillshade": "Ombreggiatura del rilievo",
@@ -2615,6 +2720,7 @@
       "subGroupDggs": "DGGS",
       "subGroupH3": "H3",
       "subGroupMovement": "Movimento e tempo",
+      "subGroupDataManagement": "Gestione dati",
       "subGroupDataQuality": "Qualità dei dati",
       "subGroupTerrain": "Terreno",
       "subGroupReproject": "Riproiezione",
@@ -2720,6 +2826,7 @@
       "embedVectorTitle": "Incorporare i dati vettoriali locali?",
       "embedVectorDesc": "Questo progetto ha {{count}} livello/i vettoriale/i locale/i caricato/i dal tuo computer. Il browser non può rileggerli quando il progetto viene riaperto, quindi i loro dati devono essere incorporati nel file di progetto per essere ripristinati. L'incorporamento aggiunge circa {{size}} al file.",
       "embedVectorDescDesktop": "Questo progetto ha {{count}} livello/i vettoriale/i locale/i caricato/i dal tuo computer. Incorpora i loro dati per rendere il progetto autonomo (aggiunge circa {{size}}), oppure salva i riferimenti ai file che vengono ricaricati dal disco quando il progetto viene riaperto. I riferimenti mantengono il file di dimensioni ridotte, ma smettono di funzionare se un file di origine viene successivamente spostato o eliminato.",
+      "embedVectorDescMas": "Questo progetto contiene {{count}} livello/i vettoriale/i locale/i caricato/i dal computer. La sandbox del Mac App Store non può mantenere l’accesso a questi file dopo la chiusura di GeoLibre, quindi i dati devono essere incorporati nel file di progetto per poter essere ripristinati. L’incorporamento aggiunge circa {{size}} al file.",
       "embedVectorLargeWarning": "Incorporare circa {{size}} produce un file di progetto molto grande. Riaprirlo può essere lento o fallire del tutto, perché ogni elemento deve essere analizzato e tenuto in memoria tutto insieme. Per dati di queste dimensioni, converti i livelli in PMTiles o FlatGeobuf e aggiungili come livelli remoti anziché incorporarli.",
       "embedVectorEmbedButton": "Incorpora dati",
       "embedVectorReferenceButton": "Salva riferimenti ai file",
@@ -3482,8 +3589,9 @@
     "addFailed": "Impossibile aggiungere la risorsa",
     "addNoSourceLayers": "Questo archivio non elenca livelli da disegnare",
     "addNoTarget": "Questo asset non elenca nulla da disegnare",
-    "addIcechunk": "Gli archivi Icechunk non possono ancora essere letti",
+    "addIcechunkFailed": "Impossibile aprire questo repository Icechunk",
     "zarrProblemGroup": "Questo asset indica un gruppo di array, non un singolo array disegnabile",
+    "zarrProblemMissing": "Questo archivio non contiene quella variabile",
     "zarrProblemUnauthorized": "Questo archivio Zarr richiede credenziali che GeoLibre non può ancora fornire",
     "zarrProblemUnsupportedUrl": "L'indirizzo di questo archivio Zarr non può essere letto una chiave alla volta",
     "zarrProblemUnavailable": "Impossibile aprire questo archivio Zarr",
@@ -4156,6 +4264,8 @@
       "removeConnection": "Rimuovi collegamento",
       "removeNode": "Rimuovi nodo",
       "resizePanel": "Ridimensiona il pannello",
+      "maximizePanel": "Massimizza il pannello",
+      "restorePanelSize": "Ripristina la dimensione precedente",
       "minimizePanel": "Riduci il pannello",
       "restorePanel": "Ripristina il pannello",
       "resizePalette": "Ridimensiona la tavolozza degli strumenti",
@@ -4192,7 +4302,31 @@
     "parameterField": {
       "selectLayer": "Seleziona un livello...",
       "selectField": "Seleziona un campo...",
-      "selectLayerFirst": "Seleziona prima un livello"
+      "selectOption": "Seleziona un'opzione...",
+      "selectLayerFirst": "Seleziona prima un livello",
+      "layersSelected_one": "{{count}} livello selezionato",
+      "layersSelected_other": "{{count}} livelli selezionati"
+    },
+    "fieldWeights": {
+      "columnField": "Campo",
+      "columnNormalization": "Normalizza",
+      "columnWeight": "Peso",
+      "columnDirection": "Direzione",
+      "addField": "Aggiungi campo",
+      "removeAria": "Rimuovi {{field}}",
+      "empty": "Ancora nessun campo. Aggiungine almeno due per costruire un punteggio.",
+      "shares": "Pesi: {{shares}}",
+      "noWeight": "Assegna ad almeno un campo un peso maggiore di zero.",
+      "normalization": {
+        "minMax": "Min-max",
+        "zScore": "Punteggio Z",
+        "rank": "Rango",
+        "quantile": "Quantile"
+      },
+      "direction": {
+        "higher": "Più alto è meglio",
+        "lower": "Più basso è meglio"
+      }
     },
     "whitebox": {
       "run": "Esegui",
@@ -4244,6 +4378,25 @@
       "auto": "Automatico",
       "chooseOutputPath": "Scegli il percorso di output",
       "chooseInputPath": "Scegli il percorso di input",
+      "startServer": "Avvia server",
+      "stopServer": "Arresta server",
+      "loadingTools": "Caricamento…",
+      "lockedPrefix": "[Bloccato] ",
+      "missingRequiredParameter": "Parametro obbligatorio mancante: {{label}}",
+      "sidecarCannotReadBrowserFiles": "Il sidecar non può leggere i file selezionati dal browser per {{label}}. Esegui lo strumento localmente (WASM) oppure indica percorsi del file system accessibili al sidecar.",
+      "selectedLayersMissing": "Uno o più livelli selezionati per {{label}} non esistono più.",
+      "layerMissingGeoJson": "Il livello “{{layer}}” non ha un GeoJSON in memoria per {{label}}.",
+      "layerNotFetchable": "Il livello “{{layer}}” non è recuperabile per {{label}}.",
+      "layerMissingPath": "Il livello “{{layer}}” non ha un percorso sul file system per {{label}}.",
+      "importOutputFailed": "Impossibile importare l'output di Whitebox.",
+      "showingSnapshotOnly": "Viene mostrato solo il catalogo GitHub.",
+      "liveCatalogEmpty": "Il catalogo in tempo reale è vuoto. Viene mostrato solo il catalogo GitHub.",
+      "jobStatus": {
+        "pending": "In attesa",
+        "running": "In esecuzione",
+        "succeeded": "Completato",
+        "failed": "Non riuscito"
+      },
       "categoryGeneral": "Generale",
       "categoryAll": "Tutti ({{total}})",
       "errorLoadSnapshot": "Impossibile caricare lo snapshot del catalogo Whitebox.",
@@ -4619,6 +4772,36 @@
             }
           }
         },
+        "extract-vertices": {
+          "name": "Estrai vertici",
+          "description": "Converte ogni vertice delle feature di input in un punto, mantenendo gli attributi originali più le colonne vertex_index e part_index (gli attributi di origine con lo stesso nome vengono sovrascritti)",
+          "params": {
+            "layer": {
+              "label": "Livello di input"
+            }
+          }
+        },
+        "points-along-geometry": {
+          "name": "Punti lungo la geometria",
+          "description": "Genera punti a un intervallo di distanza fisso lungo linee e confini di poligoni; il primo e l'ultimo vertice sono sempre inclusi. Ogni punto riceve una colonna distance (un attributo di origine con lo stesso nome viene sovrascritto)",
+          "params": {
+            "layer": {
+              "label": "Livello di input"
+            },
+            "interval": {
+              "label": "Intervallo",
+              "description": "Distanza tra i punti generati"
+            },
+            "units": {
+              "label": "Unità",
+              "options": {
+                "kilometers": "Chilometri",
+                "meters": "Metri",
+                "miles": "Miglia"
+              }
+            }
+          }
+        },
         "grid": {
           "name": "Griglia regolare",
           "description": "Genera una griglia rettangolare regolare (fishnet) di celle su un'estensione. Origine: la vista corrente della mappa, l'estensione di un livello o un rettangolo di delimitazione manuale.",
@@ -4713,6 +4896,46 @@
                 "meters": "Metri",
                 "miles": "Miglia"
               }
+            }
+          }
+        },
+        "decode-polyline": {
+          "name": "Decodifica polilinea",
+          "description": "Decodifica le stringhe di polilinea codificata di un campo attributo in un livello vettoriale LineString",
+          "params": {
+            "layer": {
+              "label": "Livello di input"
+            },
+            "field": {
+              "label": "Campo polilinea",
+              "description": "Campo attributo contenente la stringa di polilinea codificata"
+            },
+            "precision": {
+              "label": "Precisione",
+              "options": {
+                "5": "5 (Google / OSRM)",
+                "6": "6 (Valhalla / Mapbox)"
+              }
+            }
+          }
+        },
+        "encode-polyline": {
+          "name": "Codifica linea in polilinea",
+          "description": "Codifica le geometrie LineString e MultiLineString in una stringa attributo di polilinea codificata",
+          "params": {
+            "layer": {
+              "label": "Livello di input"
+            },
+            "precision": {
+              "label": "Precisione",
+              "options": {
+                "5": "5 (Google / OSRM)",
+                "6": "6 (Valhalla / Mapbox)"
+              }
+            },
+            "targetField": {
+              "label": "Nome del campo di output",
+              "description": "Nome della colonna attributo in cui salvare le polilinee codificate (predefinito: polyline)"
             }
           }
         },
@@ -5058,6 +5281,24 @@
             }
           }
         },
+        "merge-layers": {
+          "name": "Unisci livelli",
+          "description": "Combina più livelli vettoriali in uno solo, unendo i loro schemi di attributi (gli attributi mancanti diventano null)",
+          "params": {
+            "layers": {
+              "label": "Livelli di input",
+              "description": "Seleziona due o più livelli; vengono concatenati nell'ordine mostrato"
+            },
+            "addSourceField": {
+              "label": "Aggiungi campo livello di origine",
+              "description": "Registra il nome del livello di origine di ogni feature di output"
+            },
+            "sourceFieldName": {
+              "label": "Nome del campo di origine",
+              "description": "Nome del campo che memorizza il nome del livello di origine"
+            }
+          }
+        },
         "check-validity": {
           "name": "Verifica validità",
           "description": "Trova gli elementi con geometria non valida (regole GEOS: anelli autointersecanti, buchi esterni all'anello esterno, ...) e li contrassegna sulla mappa",
@@ -5367,6 +5608,50 @@
                 "95": "95%",
                 "99": "99%"
               }
+            }
+          }
+        },
+        "composite-score": {
+          "name": "Punteggio composito (indice di idoneità)",
+          "description": "Normalizza, pondera e combina più campi numerici in un unico indice da 0 a 100, quindi applica quell'indice allo stile del livello.",
+          "params": {
+            "layer": {
+              "label": "Livello"
+            },
+            "fields": {
+              "label": "Campi e pesi",
+              "description": "Due o più campi numerici. Ciascuno riceve una normalizzazione, un peso relativo e l'estremo del suo intervallo che ottiene un punteggio alto."
+            },
+            "aggregation": {
+              "label": "Aggregazione",
+              "description": "La media geometrica lascia che un campo debole abbassi il punteggio: un campo forte non può compensarlo del tutto.",
+              "options": {
+                "weighted-mean": "Media aritmetica ponderata",
+                "geometric-mean": "Media geometrica ponderata"
+              }
+            },
+            "nullHandling": {
+              "label": "Elementi senza valore",
+              "description": "Non esiste un'impostazione predefinita sicura: scartare e rinormalizzare producono mappe diverse, quindi scegli cosa significa questo indice.",
+              "options": {
+                "drop": "Escludi l'elemento dal risultato",
+                "renormalize": "Rinormalizza i pesi sui campi disponibili"
+              }
+            },
+            "scoreField": {
+              "label": "Nome del campo del punteggio",
+              "description": "Nome della colonna numerica in cui viene scritto il punteggio."
+            },
+            "scoreRange": {
+              "label": "Intervallo del punteggio",
+              "options": {
+                "0-100": "Da 0 a 100",
+                "0-1": "Da 0 a 1"
+              }
+            },
+            "keepComponents": {
+              "label": "Mantieni le componenti normalizzate",
+              "description": "Scrive il valore normalizzato di ogni campo in una colonna dedicata, così il punteggio può essere verificato invece che dato per buono."
             }
           }
         }
@@ -5718,6 +6003,7 @@
     "toolGroup": {
       "analysis": "Analisi",
       "clip": "Ritaglio",
+      "dataManagement": "Gestione dati",
       "dataQuality": "Qualità dei dati",
       "dggs": "DGGS",
       "geometry": "Geometria",
@@ -5852,6 +6138,7 @@
     "editValues": "Modifica i valori degli attributi",
     "editTitleFinishGeometry": "Termina la modifica della geometria per modificare gli attributi",
     "editTitleReadOnly": "La modifica non è disponibile per i livelli aggiunti tramite Aggiungi livello vettoriale",
+    "editTitleCapabilityDisabled": "La modifica è disabilitata per questo livello",
     "editTitleUseSaveCancel": "Usa Salva o Annulla per terminare la modifica",
     "exitEditMode": "Esci dalla modalità di modifica",
     "editTitleDuckdb": "Modifica in memoria gli attributi della query DuckDB visualizzata",
@@ -5877,6 +6164,7 @@
     "dashboard": "Dashboard",
     "exportSelectedLayer": "Esporta il livello selezionato",
     "exportTitleDisabled": "L'esportazione richiede un livello basato su GeoJSON",
+    "exportTitleCapabilityDisabled": "L'esportazione è disabilitata per questo livello",
     "cancelEdits": "Annulla le modifiche agli attributi",
     "searchPlaceholder": "Cerca negli attributi...",
     "searchAria": "Cerca negli attributi",
@@ -6048,6 +6336,15 @@
     "addClass": "Aggiungi classe",
     "removeClass": "Rimuovi classe",
     "beforeIdSavedUnavailable": "Salvato (non disponibile)",
+    "blendMode": "Fusione",
+    "blendModeFor": "Modalità di fusione di {{name}}",
+    "blendModes": {
+      "normal": "Normale",
+      "multiply": "Moltiplica",
+      "screen": "Scolora",
+      "lighten": "Schiarisci",
+      "add": "Aggiungi"
+    },
     "raster": {
       "greyscale": "Scala di grigi",
       "greyscaleHint": "Attiva/disattiva una mappa di base in scala di grigi (porta la saturazione al minimo)",
@@ -6527,6 +6824,60 @@
       "noFields": "Il layer non ha campi attributo da configurare.",
       "minMaxInvalid": "Il minimo deve essere minore o uguale al massimo."
     },
+    "popup": {
+      "heading": "Popup",
+      "showOnClick": "Mostra il popup al clic (Identifica)",
+      "showOnHover": "Mostra il suggerimento al passaggio del mouse",
+      "hoverHint": "Il suggerimento mostra il titolo e i campi che contrassegni come «Nel suggerimento».",
+      "titleField": "Campo del titolo",
+      "titleFieldDefault": "Nome del livello",
+      "titleExpression": "Espressione del titolo",
+      "titleExpressionPlaceholder": "[\"get\", \"name\"]",
+      "bodyExpression": "Espressione del corpo",
+      "bodyExpressionPlaceholder": "[\"concat\", [\"get\", \"name\"], \" has \", [\"to-string\", [\"get\", \"pop_max\"]], \" residents\"]",
+      "bodyExpressionHint": "Un'espressione del corpo sostituisce le righe dei campi con il proprio testo.",
+      "bodyReplacesRows": "Finché è impostata un'espressione del corpo, questa sostituisce le righe dei campi e la riga dell'id.",
+      "invalidExpression": "Espressione non valida",
+      "openBuilder": "Apri il generatore di espressioni",
+      "showFeatureId": "Mostra la riga con l'id dell'elemento",
+      "fields": "Campi",
+      "allFields": "Nessun campo scelto, quindi vengono mostrati tutti i campi visibili, nell'ordine dei dati stessi.",
+      "addField": "Aggiungi un campo…",
+      "noFieldsLeft": "Tutti i campi sono già elencati",
+      "chooseFields": "Scegli i campi",
+      "resetFields": "Mostra tutti i campi",
+      "removeField": "Rimuovi campo",
+      "moveUp": "Sposta il campo su",
+      "moveDown": "Sposta il campo giù",
+      "dragToReorder": "Trascina per riordinare",
+      "dragNamedToReorder": "Trascina {{name}} per riordinare",
+      "label": "Etichetta",
+      "kind": "Tipo di valore",
+      "kinds": {
+        "auto": "Automatico",
+        "text": "Testo",
+        "number": "Numero",
+        "date": "Data",
+        "link": "Collegamento",
+        "image": "Immagine"
+      },
+      "decimals": "Decimali",
+      "thousands": "Raggruppa le migliaia",
+      "dateFormat": "Formato data",
+      "dateFormats": {
+        "date": "Data",
+        "datetime": "Data e ora",
+        "time": "Ora",
+        "iso": "ISO 8601",
+        "year": "Anno"
+      },
+      "linkLabel": "Testo del collegamento",
+      "linkLabelPlaceholder": "L'URL stesso",
+      "prefix": "Prefisso",
+      "suffix": "Suffisso",
+      "inHover": "Nel suggerimento",
+      "imageNotInHover": "I campi immagine restano nel popup al clic; un suggerimento non ha spazio per un'immagine."
+    },
     "editorTracking": {
       "heading": "Tracciamento delle modifiche",
       "description": "Registra chi ha creato ogni elemento e chi lo ha modificato per ultimo. I campi seguenti vengono compilati automaticamente quando gli elementi vengono disegnati, modificati, calcolati o rilevati.",
@@ -6542,6 +6893,51 @@
       "duplicateName": "Ogni campo di tracciamento deve avere un nome diverso.",
       "columnTaken": "«{{name}}» è già una colonna di attributi. Il tracciamento ne sovrascriverebbe i valori."
     }
+  },
+  "quickFilters": {
+    "heading": "Filtri rapidi",
+    "empty": "Ancora nessun filtro. Aggiungine uno qui sotto per restringere questo livello in base a uno qualsiasi dei suoi campi.",
+    "addFilter": "Aggiungi un filtro…",
+    "allFieldsUsed": "Ogni campo ha già un filtro",
+    "removeAll": "Rimuovi tutti",
+    "clearAll": "Cancella i filtri",
+    "clearOne": "Cancella questo filtro",
+    "clearOneNamed": "Cancella il filtro su {{field}}",
+    "remove": "Rimuovi filtro",
+    "removeNamed": "Rimuovi il filtro su {{field}}",
+    "controlType": "Tipo di filtro",
+    "enabledTitle": "Applica questo filtro",
+    "kind": {
+      "categorical": "Valori",
+      "range": "Intervallo",
+      "date": "Date",
+      "text": "Testo"
+    },
+    "operator": {
+      "contains": "Contiene",
+      "startsWith": "Inizia con",
+      "equals": "È esattamente"
+    },
+    "searchValues": "Cerca valori",
+    "noValues": "Questo campo non ha valori tra cui scegliere.",
+    "noMatchingValues": "Nessun valore corrisponde alla ricerca.",
+    "selectAll": "Seleziona tutto",
+    "selectNone": "Deseleziona tutto",
+    "allValues": "Tutti i valori",
+    "selectedCount_one": "{{count}} selezionato",
+    "selectedCount_other": "{{count}} selezionati",
+    "rangeMin": "Minimo",
+    "rangeMax": "Massimo",
+    "rangeSeparator": "a",
+    "dateFrom": "Dal",
+    "dateTo": "Al",
+    "textOperator": "Corrispondenza",
+    "textValue": "Testo da cercare",
+    "textPlaceholder": "Digita per filtrare",
+    "noFields": "Questo livello non ha attributi su cui filtrare.",
+    "noTileFeatures": "Non è ancora caricato alcun elemento. Sposta o ingrandisci la mappa sui dati, poi riapri questa sezione.",
+    "viewportSampleHint": "I valori provengono dai tile attualmente caricati, quindi l'elenco cresce man mano che sposti la mappa e ingrandisci.",
+    "layerFilteredHint": "Un filtro rapido sta nascondendo parte degli elementi di questo livello."
   },
   "vectorExport": {
     "invalidKmlCoordinatesByPosition": "L'esportazione KML non ha potuto scrivere l'elemento {{position}} perché ha coordinate non valide.",
@@ -6559,6 +6955,10 @@
     "moveDown": "Sposta giù",
     "zoomToLayer": "Zoom sul livello",
     "layerActions": "Azioni livello",
+    "exportSketchesAsLayer": "Esporta gli schizzi come nuovo layer",
+    "exportSketchesKeep": "Mantieni gli elementi in Schizzi",
+    "exportSketchesClear": "Cancella gli schizzi dopo l’esportazione",
+    "exportedSketchesName": "Esportazione schizzi",
     "metadata": "Metadati",
     "removeLayer": "Rimuovi livello",
     "identifyFeatures": "Identifica elementi",
@@ -6566,6 +6966,7 @@
     "identifyInspectPixels": "Ispeziona valori dei pixel",
     "identifyStopInspectPixels": "Interrompi ispezione valori dei pixel",
     "identifyUnavailable": "L'identificazione è disponibile solo per livelli vettoriali, WMS e COG",
+    "identifyCapabilityDisabled": "L'interrogazione è disabilitata per questo livello",
     "selectFeaturesMenu": "Seleziona elementi",
     "selectFeaturesSingle": "Seleziona elementi con un clic",
     "selectFeaturesRectangle": "Seleziona elementi con un rettangolo",
@@ -6645,6 +7046,8 @@
     "searchPlacesClear": "Cancella ricerca",
     "searchPlacesGoToCoordinate": "Vai a {{coordinate}}",
     "searchPlacesGoToH3Cell": "Vai alla cella H3 {{cell}} (ris. {{resolution}})",
+    "searchPlacesGroup": "Luoghi",
+    "searchFeaturesPartial": "(parziale)",
     "background": "Sfondo",
     "backgroundCannotReorder": "Lo sfondo non può essere riordinato",
     "hideBackground": "Nascondi sfondo",
@@ -6735,6 +7138,7 @@
     "exportedWithWarnings": "Livello esportato. {{warnings}}",
     "exported": "Livello esportato.",
     "exportLayerError": "Impossibile esportare questo livello.",
+    "exportPolyline": "Polilinea codificata (precisione {{precision}})",
     "refreshIntervals": {
       "off": "Disattivato",
       "s15": "15 secondi",
@@ -7161,5 +7565,60 @@
     "mapPoint": "Punto sulla mappa",
     "reply": "Rispondi",
     "replyPlaceholder": "Scrivi una risposta..."
+  },
+  "samgeoPlugin": {
+    "panelTitle": "Segmentazione SamGeo",
+    "intro": "Segmenta le immagini con SAM3 usando testo, punti, un rettangolo o maschere automatiche.",
+    "apiUrl": "URL dell'API SamGeo",
+    "checkConnection": "Verifica connessione",
+    "notChecked": "Non verificata",
+    "checking": "Verifica in corso…",
+    "connected": "Connessa",
+    "unavailable": "Non disponibile: {{error}}",
+    "image": "Immagine",
+    "imageSource": "Origine dell'immagine",
+    "imageUpload": "Carica un file",
+    "noRasterLayers": "Nessun livello raster caricato",
+    "layerUnreadable": "Questo livello non ha una sorgente GeoTIFF leggibile; esportalo oppure carica direttamente il file.",
+    "docsLink": "Come configurare l'API SamGeo",
+    "mode": "Modalità",
+    "modeText": "Prompt testuale",
+    "modePoints": "Prompt a punti",
+    "modeBox": "Rettangolo di delimitazione (trova simili)",
+    "modeAutomatic": "Automatica (tutto)",
+    "modelId": "ID del modello",
+    "sam2ModelId": "Modello SAM2",
+    "automaticHint": "La modalità automatica esegue il generatore di maschere di SAM2, che segmenta ogni oggetto; SAM3 risponde solo ai prompt.",
+    "textPrompt": "Prompt testuale",
+    "confidence": "Soglia di confidenza",
+    "minSize": "Dimensione minima della maschera (pixel)",
+    "maxSize": "Dimensione massima della maschera (0 = nessun limite)",
+    "backend": "Backend",
+    "foregroundPoint": "+ Punto in primo piano",
+    "backgroundPoint": "− Punto di sfondo",
+    "clickForeground": "Fai clic sulla mappa per aggiungere un punto in primo piano.",
+    "clickBackground": "Fai clic sulla mappa per aggiungere un punto di sfondo.",
+    "pointAdded": "Punto aggiunto.",
+    "drawBox": "Disegna un rettangolo sulla mappa",
+    "dragBox": "Trascina un rettangolo sulla mappa.",
+    "boxAdded": "Rettangolo aggiunto.",
+    "boxSummary": "Rettangolo: {{box}}",
+    "noBox": "Nessun rettangolo disegnato.",
+    "pointSummary": "{{foreground}} in primo piano, {{background}} di sfondo",
+    "pointsPerSide": "Punti per lato",
+    "predIou": "Soglia di IoU prevista",
+    "stability": "Soglia di stabilità",
+    "clearPrompts": "Cancella i prompt",
+    "promptsCleared": "Prompt cancellati.",
+    "segment": "Segmenta",
+    "chooseImage": "Scegli prima un'immagine.",
+    "enterPrompt": "Inserisci un prompt testuale.",
+    "addPoint": "Aggiungi almeno un punto in primo piano.",
+    "drawBoxFirst": "Disegna prima un rettangolo.",
+    "segmenting": "Segmentazione in corso…",
+    "noObjects": "Nessun oggetto trovato.",
+    "added": "Aggiunto/i {{count}} elemento/i{{layer}}.",
+    "badResponse": "L'API SamGeo non ha restituito una FeatureCollection GeoJSON.",
+    "unknownProjection": "Il risultato non è in WGS84 e l'immagine non contiene una proiezione leggibile, quindi non può essere posizionato sulla mappa. Usa un GeoTIFF georeferenziato."
   }
 }
