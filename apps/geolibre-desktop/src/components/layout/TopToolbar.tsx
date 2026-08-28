@@ -105,6 +105,7 @@ import type { ThemeMode } from "../../hooks/useThemeMode";
 import { isMobile } from "../../lib/is-mobile";
 import { isTauri } from "../../lib/tauri-io";
 import { BrandMark } from "../../branding/BrandMark";
+import { shouldOfferProductUpdates } from "../../branding/product";
 import { isMaptoolkitBasemapActive } from "../../lib/maptoolkit-basemap";
 import { useDesktopSettingsStore } from "../../hooks/useDesktopSettings";
 import { MENU_MANAGED_PLUGIN_IDS, isMenuVisible, isPluginVisible } from "../../lib/ui-profile";
@@ -1780,7 +1781,7 @@ export function TopToolbar({
       id: "help.website",
       title: t("toolbar.command.website"),
       group: t("toolbar.commandGroup.help"),
-      keywords: "home page site geolibre.app",
+      keywords: "home page site dynamik orbits geospatial studio",
       icon: Globe,
       run: () => void openExternalLink(WEBSITE_URL),
     },
@@ -1788,7 +1789,7 @@ export function TopToolbar({
       id: "help.github",
       title: t("toolbar.command.githubRepository"),
       group: t("toolbar.commandGroup.help"),
-      keywords: "source code repo git opengeos",
+      keywords: "source code repo git dynamik orbits geospatial studio",
       icon: FolderGit2,
       run: () => void openExternalLink(GITHUB_URL),
     },
@@ -1806,11 +1807,10 @@ export function TopToolbar({
       icon: MessageSquare,
       run: () => void openExternalLink(FEEDBACK_URL),
     },
-    // The Microsoft Store build omits the "Check for updates" command so the app
-    // updates only through the Store (policy 10.2.5).
-    ...(IS_STORE_BUILD
-      ? []
-      : [
+    // Hosted users receive the deployed build automatically. Installed desktop
+    // builds retain this command unless their app store owns updates.
+    ...(shouldOfferProductUpdates(isTauri(), IS_STORE_BUILD)
+      ? [
           {
             id: "help.updates",
             title: t("toolbar.command.checkForUpdates"),
@@ -1821,10 +1821,11 @@ export function TopToolbar({
               setCheckForUpdatesRequest((value) => value + 1);
             },
           },
-        ]),
+        ]
+      : []),
     {
       id: "help.about",
-      title: t("toolbar.command.about"),
+      title: t("about.productTitle"),
       group: t("toolbar.commandGroup.help"),
       icon: Info,
       run: () => setAboutOpen(true),

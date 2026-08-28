@@ -2,6 +2,11 @@ import type { ConversionToolKind, RasterToolKind, VectorToolKind } from "@geolib
 import { type BuiltInMapControl, type MapController } from "@geolibre/map";
 import type { GeoLibreMapControlPosition } from "@geolibre/plugins";
 import type { ParseKeys } from "i18next";
+import {
+  PRODUCT_FEEDBACK_URL,
+  PRODUCT_REPOSITORY_URL,
+  PRODUCT_WEBSITE_URL,
+} from "../../../branding/product";
 import type { createAppAPI } from "../../../hooks/usePlugins";
 import type { AddDataKind } from "../AddDataDialog";
 
@@ -86,9 +91,9 @@ export const PLUGIN_POSITION_ITEMS: Array<{
   { value: "bottom-right", labelKey: "toolbar.position.bottomRight" },
 ];
 
-export const FEEDBACK_URL = "https://github.com/opengeos/GeoLibre/issues";
-export const WEBSITE_URL = "https://geolibre.app";
-export const GITHUB_URL = "https://github.com/opengeos/GeoLibre";
+export const FEEDBACK_URL = PRODUCT_FEEDBACK_URL;
+export const WEBSITE_URL = PRODUCT_WEBSITE_URL;
+export const GITHUB_URL = PRODUCT_REPOSITORY_URL;
 // A small (~350 KB) CORS-enabled Las Vegas Strip sample, so the URL field works
 // out of the box on both the desktop and web builds.
 export const DEFAULT_OSM_PBF_URL = "https://data.source.coop/giswqs/opengeos/LasVegas.osm.pbf";

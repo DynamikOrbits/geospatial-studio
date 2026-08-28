@@ -19,7 +19,9 @@ import {
   Search,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { shouldOfferProductUpdates } from "../../../branding/product";
 import { useDesktopSettingsStore } from "../../../hooks/useDesktopSettings";
+import { isTauri } from "../../../lib/is-tauri";
 import { IS_STORE_BUILD } from "../../../lib/updates";
 import { isMenuItemVisible } from "../../../lib/ui-profile";
 import {
@@ -60,10 +62,11 @@ export function HelpMenu({
 }: HelpMenuProps) {
   const { t } = useTranslation();
   const uiProfile = useDesktopSettingsStore((s) => s.desktopSettings.uiProfile);
-  // The Microsoft Store build strips the "Check for updates" item entirely so the
-  // app only updates through the Store (policy 10.2.5); other builds keep it.
+  const productUpdatesAvailable = shouldOfferProductUpdates(isTauri(), IS_STORE_BUILD);
+  // Hosted users receive the deployed version automatically. Installed desktop
+  // builds keep the manual update action unless their app store owns updates.
   const show = (id: string) => {
-    if (id === "help.checkForUpdates" && IS_STORE_BUILD) return false;
+    if (id === "help.checkForUpdates" && !productUpdatesAvailable) return false;
     if (viewer && (id === "help.commandPalette" || id === "help.keyboardShortcuts")) return false;
     return isMenuItemVisible(uiProfile, id);
   };
@@ -142,7 +145,7 @@ export function HelpMenu({
         {show("help.about") && (
           <DropdownMenuItem onSelect={onAbout}>
             <Info className="me-2 h-3.5 w-3.5" />
-            {t("toolbar.command.about")}
+            {t("about.productTitle")}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>

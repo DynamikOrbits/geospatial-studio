@@ -11,6 +11,8 @@ import {
 import { CheckCircle2, ExternalLink, Info, Map, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { PRODUCT_ABOUT_LINKS, shouldOfferProductUpdates } from "../../branding/product";
+import { isTauri } from "../../lib/is-tauri";
 import { openExternalLink } from "../../lib/open-external";
 import {
   APP_VERSION,
@@ -22,17 +24,6 @@ import {
 } from "../../lib/updates";
 import { ReleaseNotes } from "./ReleaseNotes";
 import { UpdateInstructions } from "./UpdateInstructions";
-
-const LINKS = [
-  {
-    labelKey: "about.homePage",
-    href: "https://geolibre.app",
-  },
-  {
-    labelKey: "about.githubRepository",
-    href: "https://github.com/opengeos/GeoLibre",
-  },
-] as const;
 
 type UpdateStatus = "idle" | "checking" | "current" | "available" | "error";
 
@@ -68,6 +59,7 @@ export function AboutDialog({
   const handledCheckForUpdatesRequestRef = useRef(0);
   const wasOpenRef = useRef(false);
   const dialogOpen = open ?? internalOpen;
+  const productUpdatesAvailable = shouldOfferProductUpdates(isTauri(), IS_STORE_BUILD);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -102,10 +94,8 @@ export function AboutDialog({
   );
 
   const handleCheckForUpdates = async () => {
-    // Belt-and-braces: the Store build hides every trigger for this flow; this
-    // guard ensures it never reaches out to GitHub even if one slips through
-    // (policy 10.2.5).
-    if (IS_STORE_BUILD) return;
+    // Hosted users and Store packages have no in-app release-check action.
+    if (!productUpdatesAvailable) return;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -167,10 +157,12 @@ export function AboutDialog({
             className={buttonClassName}
             variant="ghost"
             size={buttonSize}
-            aria-label={t("about.trigger")}
+            aria-label={t("about.productTitle")}
           >
             <Info className={iconClassName ?? "h-3.5 w-3.5 sm:me-1"} />
-            {showLabels ? <span className="hidden sm:inline">{t("about.trigger")}</span> : null}
+            {showLabels ? (
+              <span className="hidden sm:inline">{t("about.productTitle")}</span>
+            ) : null}
           </Button>
         </DialogTrigger>
       ) : null}
@@ -178,18 +170,18 @@ export function AboutDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Map className="h-5 w-5 text-primary" />
-            {t("about.title")}
+            {t("about.productTitle")}
           </DialogTitle>
-          <DialogDescription>{t("about.description")}</DialogDescription>
+          <DialogDescription>{t("about.productDescription")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
             <span className="text-muted-foreground">{t("about.version")}</span>
             <span className="font-mono text-foreground">v{APP_VERSION}</span>
           </div>
-          {/* The Microsoft Store build omits the entire in-app update flow
-              so the app updates only through the Store (policy 10.2.5). */}
-          {!IS_STORE_BUILD && (
+          {/* Hosted users receive the deployed build automatically; Store
+              packages update through the Store. */}
+          {productUpdatesAvailable && (
             <>
               <Button
                 className="w-full justify-between"
@@ -288,7 +280,7 @@ export function AboutDialog({
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {t("about.generalSectionTitle")}
             </div>
-            {LINKS.map((link) => (
+            {PRODUCT_ABOUT_LINKS.map((link) => (
               <a
                 key={link.href}
                 className="flex items-center justify-between rounded-md border px-3 py-2 text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"

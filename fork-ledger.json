@@ -11,7 +11,27 @@
     },
     {
       "path": "apps/geolibre-desktop/src/components/layout/TopToolbar.tsx",
-      "reason": "branding-v1: brand block -> <BrandMark/> (src/branding/), ds-topbar class for the all-caps menu voice"
+      "reason": "branding-v1: brand block -> <BrandMark/> (src/branding/), ds-topbar class for the all-caps menu voice; branding-v2: Help command destinations/keywords follow Geospatial Studio and hosted builds omit the irrelevant upstream release checker"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/components/layout/AboutDialog.tsx",
+      "reason": "branding-v2: About presents Geospatial Studio as the product, explicitly credits and links GeoLibre upstream, uses Dynamik-owned destinations, and omits release checks from centrally deployed web builds"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/components/layout/toolbar/HelpMenu.tsx",
+      "reason": "branding-v2: Help labels About as Geospatial Studio and hides the desktop release checker from centrally deployed web builds"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/components/layout/toolbar/constants.ts",
+      "reason": "branding-v2: Help website, repository, and feedback destinations are sourced from the fork-owned branding/product module"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/i18n/locales/en.json",
+      "reason": "branding-v2: English product identity and explicit GeoLibre fork attribution for the Geospatial Studio About surface"
+    },
+    {
+      "path": "apps/geolibre-desktop/src/lib/ui-profile.ts",
+      "reason": "branding-v2: the configurable Help/About entry uses the Geospatial Studio product label"
     },
     {
       "path": "apps/geolibre-desktop/src/index.css",
