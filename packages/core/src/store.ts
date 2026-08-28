@@ -52,9 +52,11 @@ import {
   type LayerGroup,
   type LayerLibraryEntry,
   type AttributeFormConfig,
+  type LayerPopupConfig,
   type EditorTrackingConfig,
   type LayerJoin,
   type LayerVirtualField,
+  type LayerQuickFilter,
   type LayerStyle,
   type LegendConfig,
   type MapGridLayout,
@@ -132,6 +134,8 @@ export type VectorToolKind =
   | "explode"
   | "aggregate"
   | "smooth"
+  | "extract-vertices"
+  | "points-along-geometry"
   | "grid"
   | "voronoi"
   | "cell-sectors"
@@ -141,6 +145,9 @@ export type VectorToolKind =
   | "trajectory-speed"
   | "detect-stops"
   | "space-time-proximity"
+  | "decode-polyline"
+  | "encode-polyline"
+  | "merge-layers"
   | "check-validity"
   | "fix-geometries"
   | "check-topology-rules"
@@ -156,7 +163,8 @@ export type StatisticsToolKind =
   | "getis-ord-gi"
   | "average-nearest-neighbor"
   | "kernel-density"
-  | "emerging-hot-spot";
+  | "emerging-hot-spot"
+  | "composite-score";
 
 /**
  * Identifiers of the raster processing tools. Kept in sync by hand with the
@@ -618,6 +626,12 @@ export interface AppState {
    */
   setLayerAttributeForm: (id: string, attributeForm: AttributeFormConfig | undefined) => void;
   /**
+   * Replace the layer's popup/tooltip design (which fields the Identify popup
+   * shows, in what order and under what labels, plus the hover tooltip). Pass
+   * `undefined` to restore the default full-property dump.
+   */
+  setLayerPopup: (id: string, popup: LayerPopupConfig | undefined) => void;
+  /**
    * Replace the layer's editor tracking configuration (whether creation/edit
    * author and timestamp columns are maintained, and under which names). Pass
    * `undefined` to drop the configuration entirely.
@@ -629,6 +643,13 @@ export interface AppState {
    * Pass an empty array to detach every virtual field.
    */
   setLayerVirtualFields: (id: string, fields: LayerVirtualField[]) => void;
+  /**
+   * Replace a layer's quick filters (issue #2114). The controls persist with
+   * the project and are compiled to a MapLibre filter at sync time, so this
+   * only stores state — nothing re-derives the layer's data. Pass an empty
+   * array to remove every control.
+   */
+  setLayerQuickFilters: (id: string, filters: LayerQuickFilter[]) => void;
   reorderLayer: (id: string, direction: "up" | "down") => void;
   moveLayer: (id: string, targetIndex: number) => void;
   moveLayersRelative: (
@@ -1774,6 +1795,7 @@ export const useAppStore = create<AppState>()(
         }),
 
       setLayerAttributeForm: (id, attributeForm) => get().updateLayer(id, { attributeForm }),
+      setLayerPopup: (id, popup) => get().updateLayer(id, { popup }),
 
       setLayerEditorTracking: (id, editorTracking) => get().updateLayer(id, { editorTracking }),
 
@@ -1788,6 +1810,9 @@ export const useAppStore = create<AppState>()(
           layers = cascadeLayerJoinRefresh(layers, id);
           return { layers, isDirty: true };
         }),
+
+      setLayerQuickFilters: (id, filters) =>
+        get().updateLayer(id, { quickFilters: filters.length > 0 ? filters : undefined }),
 
       setLayerVisibility: (id, visible) => get().updateLayer(id, { visible }),
 

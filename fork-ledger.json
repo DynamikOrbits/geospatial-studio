@@ -52,6 +52,10 @@
     {
       "path": "e2e/storymap.spec.ts",
       "reason": "branding-v1: exported-story projection assertion follows the 2D default (globe -> mercator)."
+    },
+    {
+      "path": "e2e/blend-modes.spec.ts",
+      "reason": "branding-v1: pixel assertions wait for the remote dark basemap to settle and compare premultiplied-alpha Lighten against that dark backdrop rather than upstream's light-basemap normal composite."
     }
   ]
 }

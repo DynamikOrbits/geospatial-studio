@@ -15,13 +15,20 @@ import {
 import { Wrench } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import type { ToolbarPanel } from "../../../hooks/useToolbarPanels";
 import { isMobile } from "../../../lib/is-mobile";
+import type { ToolbarPanel } from "../../../hooks/useToolbarPanels";
+import type { ParseKeys } from "i18next";
 import { useDesktopSettingsStore } from "../../../hooks/useDesktopSettings";
 import { masHidesMenuItem } from "../../../lib/mas-build";
 import { isMenuItemVisible } from "../../../lib/ui-profile";
+import { whiteboxMenuSubcategorySlug } from "../../../lib/processing-tool-i18n";
 import { WHITEBOX_MENU_CATALOG } from "../../../lib/whitebox-menu-catalog";
 import type { ToolbarChrome } from "./constants";
+
+/** Convert a Whitebox subcategory label to its full i18n key. */
+function subcatKey(label: string): string {
+  return `processing.whitebox.menuSubcategory.${whiteboxMenuSubcategorySlug(label)}`;
+}
 
 // Earth Engine sign-in needs the Rust loopback OAuth listener, which the Apple
 // App Store builds (Mac App Store and iOS) compile out so the app claims no
@@ -166,19 +173,27 @@ export function ProcessingMenu({
                 {cat.subcategories.length === 1
                   ? cat.subcategories[0].tools.map((tool) => (
                       <DropdownMenuItem key={tool.id} onSelect={() => openWhiteboxTool(tool.id)}>
-                        {tool.name}
+                        {t(`processing.whitebox.menuTool.${tool.id}` as ParseKeys, {
+                          defaultValue: tool.name,
+                        })}
                       </DropdownMenuItem>
                     ))
                   : cat.subcategories.map((sub) => (
                       <DropdownMenuSub key={sub.label}>
-                        <DropdownMenuSubTrigger>{sub.label}</DropdownMenuSubTrigger>
+                        <DropdownMenuSubTrigger>
+                          {t(subcatKey(sub.label) as ParseKeys, {
+                            defaultValue: sub.label,
+                          })}
+                        </DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
                           {sub.tools.map((tool) => (
                             <DropdownMenuItem
                               key={tool.id}
                               onSelect={() => openWhiteboxTool(tool.id)}
                             >
-                              {tool.name}
+                              {t(`processing.whitebox.menuTool.${tool.id}` as ParseKeys, {
+                                defaultValue: tool.name,
+                              })}
                             </DropdownMenuItem>
                           ))}
                         </DropdownMenuSubContent>
@@ -261,6 +276,12 @@ export function ProcessingMenu({
                     <DropdownMenuItem onSelect={() => setVectorToolOpen("simplify")}>
                       {t("toolbar.vectorTool.simplify")}
                     </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setVectorToolOpen("decode-polyline")}>
+                      {t("toolbar.vectorTool.decodePolyline")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setVectorToolOpen("encode-polyline")}>
+                      {t("toolbar.vectorTool.encodePolyline")}
+                    </DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => setVectorToolOpen("reproject")}>
                       {t("toolbar.vectorTool.reproject")}
                     </DropdownMenuItem>
@@ -272,6 +293,12 @@ export function ProcessingMenu({
                     </DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => setVectorToolOpen("smooth")}>
                       {t("toolbar.vectorTool.smooth")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setVectorToolOpen("extract-vertices")}>
+                      {t("toolbar.vectorTool.extractVertices")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setVectorToolOpen("points-along-geometry")}>
+                      {t("toolbar.vectorTool.pointsAlongGeometry")}
                     </DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => setVectorToolOpen("grid")}>
                       {t("toolbar.vectorTool.grid")}
@@ -336,6 +363,13 @@ export function ProcessingMenu({
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel className="text-xs text-muted-foreground">
+                      {t("toolbar.item.subGroupDataManagement")}
+                    </DropdownMenuLabel>
+                    <DropdownMenuItem onSelect={() => setVectorToolOpen("merge-layers")}>
+                      {t("toolbar.vectorTool.mergeLayers")}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-xs text-muted-foreground">
                       {t("toolbar.item.subGroupDataQuality")}
                     </DropdownMenuLabel>
                     <DropdownMenuItem onSelect={() => setVectorToolOpen("check-validity")}>
@@ -392,6 +426,9 @@ export function ProcessingMenu({
                     </DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => setStatisticsToolOpen("emerging-hot-spot")}>
                       {t("toolbar.statisticsTool.emergingHotSpot")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setStatisticsToolOpen("composite-score")}>
+                      {t("toolbar.statisticsTool.compositeScore")}
                     </DropdownMenuItem>
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
