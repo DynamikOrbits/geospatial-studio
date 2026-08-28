@@ -2123,6 +2123,7 @@ export function TopToolbar({
           open={fieldCollectionOpen}
           onOpenChange={setFieldCollectionOpen}
           mapControllerRef={mapControllerRef}
+          mapReadyGeneration={mapReadyGeneration}
         />
       )}
       {!viewer && (
