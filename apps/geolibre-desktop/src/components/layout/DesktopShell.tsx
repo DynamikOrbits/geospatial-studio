@@ -2395,6 +2395,7 @@ export function DesktopShell({
                   forceBuiltinCollapsed={storymapPresenting}
                   renderBuiltin={({ collapsed, onCollapsedChange }) => (
                     <LayerPanel
+                      themeMode={themeMode}
                       mapControllerRef={mapControllerRef}
                       collaborationApi={collaboration}
                       onResizeStart={startLayerPanelResize}
@@ -2425,6 +2426,7 @@ export function DesktopShell({
                   />
                 ) : (
                   <LayerPanel
+                    themeMode={themeMode}
                     mapControllerRef={mapControllerRef}
                     collaborationApi={collaboration}
                     onResizeStart={startLayerPanelResize}

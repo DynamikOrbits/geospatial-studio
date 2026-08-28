@@ -15,6 +15,7 @@ import {
   createDefaultMapView,
   createEmptyProject,
   DEFAULT_PROJECT_NAME,
+  normalizeBlankBackgroundColor,
 } from "./project";
 import { initialLayerStyle } from "./layer-defaults";
 import {
@@ -217,6 +218,7 @@ export interface AppState {
   basemapStyleUrl: string;
   basemapVisible: boolean;
   basemapOpacity: number;
+  blankBackgroundColor: string | null;
   layers: GeoLibreLayer[];
   layerGroups: LayerGroup[];
   preferences: ProjectPreferences;
@@ -437,6 +439,7 @@ export interface AppState {
   restoreEarthBasemap: (styleUrl: string) => void;
   setBasemapVisible: (visible: boolean) => void;
   setBasemapOpacity: (opacity: number) => void;
+  setBlankBackgroundColor: (color: string | null) => void;
   setPreferences: (preferences: ProjectPreferences) => void;
   setLegend: (legend: LegendConfig) => void;
   /**
@@ -1037,6 +1040,7 @@ export const useAppStore = create<AppState>()(
       basemapStyleUrl: DEFAULT_BASEMAP,
       basemapVisible: true,
       basemapOpacity: 1,
+      blankBackgroundColor: null,
       layers: [],
       layerGroups: [],
       preferences: DEFAULT_PROJECT_PREFERENCES,
@@ -1334,6 +1338,8 @@ export const useAppStore = create<AppState>()(
         })),
       setBasemapVisible: (visible) => set({ basemapVisible: visible, isDirty: true }),
       setBasemapOpacity: (opacity) => set({ basemapOpacity: opacity, isDirty: true }),
+      setBlankBackgroundColor: (color) =>
+        set({ blankBackgroundColor: normalizeBlankBackgroundColor(color), isDirty: true }),
       setPreferences: (preferences) => set({ preferences, isDirty: true }),
       setLegend: (legend) => set({ legend, isDirty: true }),
 
@@ -2363,6 +2369,7 @@ export const useAppStore = create<AppState>()(
         basemapStyleUrl: s.basemapStyleUrl,
         basemapVisible: s.basemapVisible,
         basemapOpacity: s.basemapOpacity,
+        blankBackgroundColor: s.blankBackgroundColor,
         storymap: s.storymap,
         comments: s.comments,
       }),
@@ -2380,6 +2387,7 @@ export const useAppStore = create<AppState>()(
         a.basemapStyleUrl === b.basemapStyleUrl &&
         a.basemapVisible === b.basemapVisible &&
         a.basemapOpacity === b.basemapOpacity &&
+        a.blankBackgroundColor === b.blankBackgroundColor &&
         a.storymap === b.storymap &&
         shallow(a.layers, b.layers) &&
         shallow(a.comments, b.comments) &&
