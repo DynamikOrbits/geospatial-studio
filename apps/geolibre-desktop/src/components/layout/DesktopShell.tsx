@@ -1702,12 +1702,15 @@ export function DesktopShell({
   // Dropping a file adds a layer to the project, so it belongs with the menus,
   // shortcuts, and command palette the viewer preset switches off — otherwise
   // drag and drop is a way back into authoring that the read-only chrome never
-  // advertises. Both drop paths are gated: the Tauri native listener here and
-  // the webview handlers below.
-  const viewerReadOnly = layoutOptions.viewer;
+  // advertises. A deployment that withheld `data:add` closes the same door for
+  // the same reason: hiding the Add Data menu means nothing if a file dragged
+  // onto the map still loads (issue #1673). Both drop paths are gated: the
+  // Tauri native listener here and the webview handlers below.
+  const deploymentCapabilities = useAppStore((s) => s.deploymentCapabilities);
+  const dropDisabled = layoutOptions.viewer || !deploymentCapabilities.has("data:add");
 
   useEffect(() => {
-    if (!isTauri() || viewerReadOnly) return;
+    if (!isTauri() || dropDisabled) return;
 
     let unlisten: (() => void) | null = null;
     let disposed = false;
@@ -1870,44 +1873,51 @@ export function DesktopShell({
     addDroppedRasters,
     addDroppedPhotos,
     addGeoJsonLayer,
-    viewerReadOnly,
+    dropDisabled,
   ]);
 
   const handleDragEnter = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
-      if (viewerReadOnly || !hasDroppedFiles(event)) return;
+      if (dropDisabled || !hasDroppedFiles(event)) return;
       event.preventDefault();
       dragDepthRef.current += 1;
       setIsDraggingFiles(true);
     },
-    [viewerReadOnly],
+    [dropDisabled],
   );
 
   const handleDragOver = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
       // Leaving the default action in place makes the browser refuse the drop,
-      // so the overlay never appears and nothing is imported.
-      if (viewerReadOnly || !hasDroppedFiles(event)) return;
+      // so the overlay never appears and nothing is imported. A drop we will
+      // *not* import still has to be cancelled here, though: the browser's own
+      // default is to navigate the tab to the dropped file, which would take a
+      // viewer or a locked-down kiosk out of the app entirely. Cancel either
+      // way, and say so with the cursor.
+      if (!hasDroppedFiles(event)) return;
       event.preventDefault();
-      event.dataTransfer.dropEffect = "copy";
+      event.dataTransfer.dropEffect = dropDisabled ? "none" : "copy";
     },
-    [viewerReadOnly],
+    [dropDisabled],
   );
 
   const handleDragLeave = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
-      if (viewerReadOnly || !hasDroppedFiles(event)) return;
+      if (dropDisabled || !hasDroppedFiles(event)) return;
       event.preventDefault();
       dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
       if (dragDepthRef.current === 0) setIsDraggingFiles(false);
     },
-    [viewerReadOnly],
+    [dropDisabled],
   );
 
   const handleDrop = useCallback(
     async (event: DragEvent<HTMLDivElement>) => {
-      if (viewerReadOnly || !hasDroppedFiles(event)) return;
+      if (!hasDroppedFiles(event)) return;
+      // Cancel before the capability check, for the same reason as dragover:
+      // an uncancelled drop navigates away from the app.
       event.preventDefault();
+      if (dropDisabled) return;
       dragDepthRef.current = 0;
       setIsDraggingFiles(false);
       setDropError(null);
@@ -2020,7 +2030,7 @@ export function DesktopShell({
       addDroppedRasters,
       addDroppedPhotos,
       addGeoJsonLayer,
-      viewerReadOnly,
+      dropDisabled,
     ],
   );
 
