@@ -70,6 +70,7 @@ import { installStaleChunkReload } from "./lib/stale-chunk-reload";
 import { resolveAuthGate, type AuthGateConfig } from "./lib/auth-gate";
 import { getInitialThemeMode } from "./hooks/useThemeMode";
 import { applyTemporaryDesktopSettings } from "./hooks/useDesktopSettings";
+import { isEmbedded } from "./hooks/embedHost";
 import {
   desktopSettingsUrl,
   fetchDesktopSettings,
@@ -185,20 +186,26 @@ function loadAuthGate(
 // stale lazy chunk 404s (cooldown-guarded; if sessionStorage is blocked it
 // skips the reload and lets the preload error surface instead). That keeps
 // the user's session/map state intact and removes the self-refresh loop.
-registerSW({
-  immediate: true,
-  onNeedReload() {
-    // Intentionally a no-op: the updated SW is already in control, so let the
-    // refreshed shell load on the user's next page load rather than yanking the
-    // page out from under them. See installStaleChunkReload for the on-demand
-    // recovery path when a now-deleted lazy chunk is actually requested.
-  },
-  onRegisterError(error) {
-    // Registration can fail in production (non-secure origin, scope conflict).
-    // The app still works without the SW, so surface it rather than fail.
-    console.error("[GeoLibre] Service worker registration failed", error);
-  },
-});
+// Embedded deployments are controlled by their host and intentionally do not
+// own an offline cache. In particular, Dynamik's isolated embed origin returns
+// 410 for /sw.js so a framed app cannot install a worker outside the Workspace
+// lifecycle. Do not turn that deliberate boundary into a startup diagnostic.
+if (!isEmbedded()) {
+  registerSW({
+    immediate: true,
+    onNeedReload() {
+      // Intentionally a no-op: the updated SW is already in control, so let the
+      // refreshed shell load on the user's next page load rather than yanking the
+      // page out from under them. See installStaleChunkReload for the on-demand
+      // recovery path when a now-deleted lazy chunk is actually requested.
+    },
+    onRegisterError(error) {
+      // Registration can fail in production (non-secure origin, scope conflict).
+      // The app still works without the SW, so surface it rather than fail.
+      console.error("[GeoLibre] Service worker registration failed", error);
+    },
+  });
+}
 
 const sharedSettingsUrl = desktopSettingsUrl(window.location.search);
 const sharedSettingsReady = sharedSettingsUrl

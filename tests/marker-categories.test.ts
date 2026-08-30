@@ -192,6 +192,31 @@ describe("markerImageValue", () => {
 });
 
 describe("custom SVG marker fetches", () => {
+  it("resolves arbitrary basemap sprite gaps before MapLibre emits a warning", async () => {
+    let resolver: ((id: string) => Promise<void>) | undefined;
+    let eventHandlers = 0;
+    const images = new Set<string>();
+    const map = {
+      setMissingStyleImageResolver: (next: (id: string) => Promise<void>) => {
+        resolver = next;
+      },
+      on: () => {
+        eventHandlers += 1;
+      },
+      hasImage: (id: string) => images.has(id),
+      addImage: (id: string) => {
+        images.add(id);
+      },
+    };
+
+    ensureGeneratedImageHandler(map as never);
+    assert.ok(resolver);
+    await resolver("circle-11");
+
+    assert.equal(images.has("circle-11"), true);
+    assert.equal(eventHandlers, 0);
+  });
+
   it("retries a remote SVG whose first fetch failed", async () => {
     // Run the registered sprite factory the way styleimagemissing does.
     let missing: ((event: { id: string }) => void) | undefined;
