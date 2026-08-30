@@ -248,6 +248,12 @@ describe("parseEmbedRequest: v2 commands", () => {
       command: { type: "exportImage" },
       requestId: null,
     });
+    assert.deepEqual(parseEmbedRequest(message("captureViewport", undefined, {
+      requestId: "capture-viewport-1",
+    })), {
+      command: { type: "captureViewport" },
+      requestId: "capture-viewport-1",
+    });
   });
 
   it("rejects invalid addData URLs and options", () => {

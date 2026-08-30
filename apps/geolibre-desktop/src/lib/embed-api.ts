@@ -149,7 +149,8 @@ export type EmbedCommand =
   | { type: "getViewport" }
   | { type: "addLayer"; spec: AddLayerSpec }
   | { type: "addData"; url: string; styleUrl: string | null; fit: boolean }
-  | { type: "exportImage" };
+  | { type: "exportImage" }
+  | { type: "captureViewport" };
 
 /** A parsed inbound message: the command plus the host's correlation id. */
 export interface EmbedRequest {
@@ -616,6 +617,8 @@ export function parseEmbedRequest(
     }
     case "exportImage":
       return { command: { type: "exportImage" }, requestId };
+    case "captureViewport":
+      return { command: { type: "captureViewport" }, requestId };
     default:
       return null;
   }
