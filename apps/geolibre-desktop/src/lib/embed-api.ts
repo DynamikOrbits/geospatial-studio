@@ -571,7 +571,8 @@ export function parseEmbedRequest(
         (spec.style !== undefined && !isRecord(spec.style)) ||
         (spec.metadata !== undefined && !isRecord(spec.metadata)) ||
         (spec.geojson !== undefined && !isRecord(spec.geojson)) ||
-        (spec.beforeId !== undefined && typeof spec.beforeId !== "string")
+        (spec.beforeId !== undefined && typeof spec.beforeId !== "string") ||
+        (spec.fit !== undefined && typeof spec.fit !== "boolean")
       ) {
         return fail("addLayer: invalid project layer specification");
       }
