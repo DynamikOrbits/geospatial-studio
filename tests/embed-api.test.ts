@@ -216,6 +216,34 @@ describe("parseEmbedRequest: v2 commands", () => {
     );
     assert.deepEqual(
       parseEmbedRequest(
+        message("addLayer", {
+          spec: {
+            id: "fitted",
+            name: "Fitted",
+            type: "geojson",
+            source: {},
+            geojson: { type: "FeatureCollection", features: [] },
+            fit: true,
+          },
+        }),
+      ),
+      {
+        command: {
+          type: "addLayer",
+          spec: {
+            id: "fitted",
+            name: "Fitted",
+            type: "geojson",
+            source: {},
+            geojson: { type: "FeatureCollection", features: [] },
+            fit: true,
+          },
+        },
+        requestId: null,
+      },
+    );
+    assert.deepEqual(
+      parseEmbedRequest(
         message("addData", {
           url: "https://example.com/data.parquet",
           styleUrl: "https://example.com/style.json",
@@ -337,6 +365,14 @@ describe("parseEmbedRequest: setFilter", () => {
 });
 
 describe("parseEmbedRequest: addLayer", () => {
+  it("rejects a non-boolean fit option", () => {
+    const parsed = parseEmbedRequest(
+      message("addLayer", { spec: addLayerSpec({ fit: "yes" as unknown as boolean }) }),
+    );
+    assert.ok(parsed && "error" in parsed);
+    assert.equal(parsed.error, "addLayer: invalid project layer specification");
+  });
+
   it("rejects a spec whose source carries nothing renderable", () => {
     // An `xyz` layer whose source has no usable tile template would be acked as
     // a success and then render nothing, so it is refused up front instead.
@@ -467,6 +503,7 @@ describe("buildEmbedLayer", () => {
           metadata: { note: "from the host" },
           geojson,
           beforeId: "basemap",
+          fit: true,
         }),
         [],
       ),

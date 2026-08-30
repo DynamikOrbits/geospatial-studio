@@ -39,6 +39,8 @@ export interface AddLayerSpec {
   metadata?: Record<string, unknown>;
   geojson?: unknown;
   beforeId?: string;
+  /** Fit the map to the added layer once the interactive map is ready. */
+  fit?: boolean;
 }
 
 export interface AddDataOptions {
