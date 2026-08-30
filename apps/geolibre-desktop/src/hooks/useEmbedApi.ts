@@ -61,10 +61,11 @@ export function useEmbedApi(
 ): void {
   useEffect(() => {
     if (typeof window === "undefined") return;
-    // `ready` promises that every command is usable. Plugin-backed data loaders
-    // join the API only after the map has initialized, so do not advertise the
-    // bridge during the earlier render where that API is still absent.
-    if (!mapAppAPI) return;
+    // Expose the transport before MapLibre finishes loading. Browsers throttle
+    // animation frames and map initialization in background tabs, but a host
+    // must still be able to discover the bridge and enqueue store-backed work
+    // such as addLayer. Commands that truly need the map or plugin API perform
+    // their own readiness checks below.
     const allowedOrigins = readEmbedOrigins();
     if (allowedOrigins.length === 0) return;
     const host = window.parent;
@@ -247,6 +248,7 @@ export function useEmbedApi(
           return layer.id;
         }
         case "addData": {
+          if (!mapAppAPI) throw new Error("The map is not ready yet");
           const abort = new AbortController();
           dataLoadAborts.add(abort);
           const result = await queueDataLoad(() =>
