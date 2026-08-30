@@ -4,6 +4,59 @@ const HOST_PATH = "/__embed-api-host";
 const E2E_PORT = Number(process.env.GEOLIBRE_E2E_PORT ?? "4173");
 const HOST_ORIGIN = `http://localhost:${E2E_PORT}`;
 
+test("keeps the isolated Workspace embed free of startup diagnostics", async ({
+  context,
+  page,
+}) => {
+  let serviceWorkerRequests = 0;
+  context.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/sw.js")) {
+      serviceWorkerRequests += 1;
+    }
+  });
+  // The production embed origin deliberately returns 410 for this path. An
+  // embedded app must not attempt registration in the first place.
+  await page.route("**/sw.js", async (route) => {
+    await route.fulfill({ status: 410, contentType: "text/plain", body: "disabled for embeds" });
+  });
+  // Exercise the MapLibre 6 missing-image path deterministically. The style's
+  // absent `circle-11` used to produce the second visible diagnostic even
+  // though the map continued rendering correctly.
+  await page.route("https://tiles.openfreemap.org/styles/dark", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        version: 8,
+        sources: {
+          places: {
+            type: "geojson",
+            data: {
+              type: "FeatureCollection",
+              features: [{
+                type: "Feature",
+                properties: {},
+                geometry: { type: "Point", coordinates: [2.3522, 48.8566] },
+              }],
+            },
+          },
+        },
+        layers: [{
+          id: "missing-basemap-icon",
+          type: "symbol",
+          source: "places",
+          layout: { "icon-image": "circle-11" },
+        }],
+      }),
+    });
+  });
+
+  await page.goto("/?embed=1&welcome=0&theme=dark");
+
+  await expect(page.getByRole("button", { name: "Diagnostics: 0" })).toBeVisible();
+  expect(serviceWorkerRequests).toBe(0);
+});
+
 test("exposes the embed bridge and accepts store-backed layers before the map is ready", async ({
   page,
 }) => {

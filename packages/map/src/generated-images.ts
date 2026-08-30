@@ -94,7 +94,7 @@ export function registerGeneratedImage(id: string, factory: GeneratedImageFactor
         } catch {
           // Ignore
         }
-        addGeneratedImage(map, id);
+        void addGeneratedImage(map, id);
       }
     }
   }
@@ -102,7 +102,7 @@ export function registerGeneratedImage(id: string, factory: GeneratedImageFactor
 
 const TRANSPARENT_1X1 = new Uint8Array([0, 0, 0, 0]);
 
-function addGeneratedImage(map: maplibregl.Map, id: string): void {
+async function addGeneratedImage(map: maplibregl.Map, id: string): Promise<void> {
   if (map.hasImage(id)) return;
   const factory = factories.get(id);
   if (!factory) {
@@ -121,19 +121,18 @@ function addGeneratedImage(map: maplibregl.Map, id: string): void {
     return;
   }
   if (result instanceof Promise) {
-    result
-      .then((resolved) => {
-        if (resolved && !map.hasImage(id)) {
-          map.addImage(id, resolved.image, { pixelRatio: resolved.pixelRatio });
-        } else if (!map.hasImage(id)) {
-          map.addImage(id, { width: 1, height: 1, data: TRANSPARENT_1X1 });
-        }
-      })
-      .catch(() => {
-        if (!map.hasImage(id)) {
-          map.addImage(id, { width: 1, height: 1, data: TRANSPARENT_1X1 });
-        }
-      });
+    try {
+      const resolved = await result;
+      if (resolved && !map.hasImage(id)) {
+        map.addImage(id, resolved.image, { pixelRatio: resolved.pixelRatio });
+      } else if (!map.hasImage(id)) {
+        map.addImage(id, { width: 1, height: 1, data: TRANSPARENT_1X1 });
+      }
+    } catch {
+      if (!map.hasImage(id)) {
+        map.addImage(id, { width: 1, height: 1, data: TRANSPARENT_1X1 });
+      }
+    }
     return;
   }
   map.addImage(id, result.image, { pixelRatio: result.pixelRatio });
@@ -149,7 +148,17 @@ export function ensureGeneratedImageHandler(map: maplibregl.Map): void {
   if (typeof map.on !== "function") return;
   wiredMaps.add(map);
   activeMaps.add(new WeakRef(map));
+  // MapLibre 6 checks a missing-image resolver before it emits
+  // `styleimagemissing`. The event is now notification-only: adding an image
+  // from its listener is too late for the current request and MapLibre still
+  // logs a warning. Resolve through the awaited API when available so both
+  // generated app sprites and harmless basemap sprite gaps are settled before
+  // diagnostics capture sees them. Keep the event path for older/stub maps.
+  if (typeof map.setMissingStyleImageResolver === "function") {
+    map.setMissingStyleImageResolver((id) => addGeneratedImage(map, id));
+    return;
+  }
   map.on("styleimagemissing", (event) => {
-    addGeneratedImage(map, event.id);
+    void addGeneratedImage(map, event.id);
   });
 }
