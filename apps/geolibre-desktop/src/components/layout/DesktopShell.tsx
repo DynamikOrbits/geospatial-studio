@@ -155,9 +155,9 @@ import { KnowledgeCardConsentDialog } from "./KnowledgeCardConsentDialog";
 import { MapGrid } from "./MapGrid";
 import { RemoteCursorsOverlay } from "./RemoteCursorsOverlay";
 import { useCommandBridge } from "../../hooks/useCommandBridge";
-import { useEmbedApi } from "../../hooks/useEmbedApi";
 import { useJupyterRelay } from "../../hooks/useJupyterRelay";
 import { appendDiagnostic, useDiagnosticsSnapshot } from "../../lib/diagnostics";
+import { appMapControllerRef } from "../../lib/map-controller-ref";
 import { SectionErrorBoundary, SilentErrorBoundary } from "../common/error-boundaries";
 import { AttributeTable } from "../panels/AttributeTable";
 import { RasterAttributeTable } from "../panels/RasterAttributeTable";
@@ -554,6 +554,10 @@ function initialSidePanelWidth(): number {
 type ShellStyle = CSSProperties &
   Record<"--layer-panel-width" | "--style-panel-width" | "--notebook-panel-width", string>;
 
+// One map exists per application window. Keeping its ref at module scope lets
+// App own the embed transport even while DesktopShell is gated or unmounted.
+const mapControllerRef = appMapControllerRef;
+
 export function DesktopShell({
   layoutOptions,
   projectUrlLoadState,
@@ -633,8 +637,6 @@ export function DesktopShell({
   // mid-drag still detaches the global listeners and restores document.body.
   const activeResizeCleanupRef = useRef<(() => void) | null>(null);
   useEffect(() => () => activeResizeCleanupRef.current?.(), []);
-  const mapControllerRef = useRef<MapController | null>(null);
-
   // Frame layers a `?data=` deep link added. Single non-GeoJSON datasets move
   // the camera in their format-specific loader; a repeated `data` batch lists
   // every added layer here so their stored extents are combined into one fit.
@@ -807,7 +809,7 @@ export function DesktopShell({
       }
       manager.deactivate(id, createAppAPI(mapControllerRef));
     }
-  }, [layoutOptions.viewer, mapControllerRef]);
+  }, [layoutOptions.viewer]);
 
   useEffect(() => {
     enforceViewerPlugins();
@@ -911,10 +913,6 @@ export function DesktopShell({
   // Request/reply + event channel backing the Python scripting API (live
   // queries, processing, map events). Also inert when not embedded.
   useCommandBridge(mapControllerRef);
-  // Runtime postMessage API for a third-party host page that frames the app
-  // (fly to a record, highlight it, open a tool; selection/view/tool events back
-  // out). Off unless the deployment configured GEOLIBRE_EMBED_ORIGINS.
-  useEmbedApi(mapControllerRef, mapAppAPI);
   // Same scripting surface, reached over the desktop Jupyter server's relay, so
   // a kernel driven from an EXTERNAL client (VS Code's Jupyter extension) can
   // control the map too. Inert until that server is running.
