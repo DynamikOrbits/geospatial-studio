@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readLastBasemap, writeLastBasemap } from "../apps/geolibre-desktop/src/lib/last-basemap";
+import {
+  readLastBasemap,
+  shouldUseLastBasemapPersistence,
+  writeLastBasemap,
+} from "../apps/geolibre-desktop/src/lib/last-basemap";
 import { LAST_BASEMAP_STORAGE_KEY } from "../apps/geolibre-desktop/src/lib/storage-keys";
 
 function memoryStorage(): Storage {
@@ -18,6 +22,11 @@ function memoryStorage(): Storage {
 }
 
 describe("last basemap persistence", () => {
+  it("isolates embedded views from the browser's top-level basemap preference", () => {
+    assert.equal(shouldUseLastBasemapPersistence(false), true);
+    assert.equal(shouldUseLastBasemapPersistence(true), false);
+  });
+
   it("round-trips a selected basemap", () => {
     const storage = memoryStorage();
     writeLastBasemap("https://example.com/style.json", storage);
