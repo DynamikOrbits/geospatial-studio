@@ -34,7 +34,7 @@ export interface CapturedMap {
   bearingDeg: number;
 }
 
-interface MapLike {
+export interface MapLike {
   getCanvas(): HTMLCanvasElement;
   getContainer(): HTMLElement;
   getBearing(): number;

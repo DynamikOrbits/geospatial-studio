@@ -2,6 +2,7 @@ import { useAppStore } from "@geolibre/core";
 import { type RefObject, useEffect } from "react";
 import { getLayerBounds, type MapController } from "@geolibre/map";
 import { captureMapImage } from "../lib/print-layout-export";
+import { captureWorkspaceViewportImage } from "../lib/workspace-viewport-capture";
 import {
   buildEmbedEvent,
   buildEmbedLayer,
@@ -276,6 +277,11 @@ export function useEmbedApi(
           const map = controller()?.getMap();
           if (!map) throw new Error("The map is not ready yet");
           return captureMapImage(map).image.toDataURL("image/png");
+        }
+        case "captureViewport": {
+          const map = controller()?.getMap();
+          if (!map) throw new Error("The map is not ready yet");
+          return captureWorkspaceViewportImage(map);
         }
       }
     };
