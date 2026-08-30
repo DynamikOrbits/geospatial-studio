@@ -1,5 +1,5 @@
 import { useAppStore } from "@geolibre/core";
-import { type RefObject, useEffect } from "react";
+import { type RefObject, useEffect, useRef } from "react";
 import { getLayerBounds, type MapController } from "@geolibre/map";
 import { captureMapImage } from "../lib/print-layout-export";
 import { captureWorkspaceViewportImage } from "../lib/workspace-viewport-capture";
@@ -59,6 +59,14 @@ export function useEmbedApi(
   mapControllerRef: RefObject<MapController | null>,
   mapAppAPI: ReturnType<typeof createAppAPI> | null,
 ): void {
+  // Map readiness changes after the transport is mounted. Keep the newest API
+  // behind a ref so that transition does not tear down the postMessage listener
+  // while an early, store-backed command is still completing.
+  const mapAppAPIRef = useRef(mapAppAPI);
+  useEffect(() => {
+    mapAppAPIRef.current = mapAppAPI;
+  }, [mapAppAPI]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     // Expose the transport before MapLibre finishes loading. Browsers throttle
@@ -125,6 +133,7 @@ export function useEmbedApi(
     let loadAbort: AbortController | null = null;
     const dataLoadAborts = new Set<AbortController>();
     let dataLoadQueue: Promise<void> = Promise.resolve();
+    let pendingCameraUpdate: Promise<void> = Promise.resolve();
 
     const queueDataLoad = <T>(operation: () => Promise<T>): Promise<T> => {
       const next = dataLoadQueue.then(operation, operation);
@@ -132,6 +141,59 @@ export function useEmbedApi(
         () => undefined,
         () => undefined,
       );
+      return next;
+    };
+
+    const waitForMapController = (): Promise<MapController> =>
+      new Promise((resolve, reject) => {
+        const deadline = Date.now() + 120_000;
+        const poll = () => {
+          if (disposed) {
+            reject(new Error("The embed session ended before the map was ready"));
+            return;
+          }
+          const map = controller();
+          if (map?.getMap()) {
+            resolve(map);
+            return;
+          }
+          if (Date.now() >= deadline) {
+            reject(new Error("The map did not become ready in time to fit the added layer"));
+            return;
+          }
+          window.setTimeout(poll, 50);
+        };
+        poll();
+      });
+
+    const queueCameraFit = (bounds: [number, number, number, number]): Promise<void> => {
+      const next = pendingCameraUpdate.catch(() => undefined).then(async () => {
+        const map = await waitForMapController();
+        const liveMap = map.getMap();
+        if (!liveMap) throw new Error("The map became unavailable before the layer could be fitted");
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          let timeoutId = 0;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            liveMap.off("moveend", finish);
+            window.clearTimeout(timeoutId);
+            resolve();
+          };
+          liveMap.on("moveend", finish);
+          map.fitBounds(bounds);
+          // MapController's fit animation is 800 ms. Keep a bounded fallback
+          // for renderers that do not emit moveend (for example after a tab is
+          // backgrounded while the command is in flight).
+          timeoutId = window.setTimeout(finish, 1_500);
+        });
+        // Let the settled camera/store changes paint before a capture requested
+        // in the next host command reads the preserved WebGL drawing buffer.
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      });
+      pendingCameraUpdate = next;
       return next;
     };
 
@@ -245,14 +307,23 @@ export function useEmbedApi(
           const state = useAppStore.getState();
           const layer = buildEmbedLayer(command.spec, state.layers);
           state.addLayer(layer, command.spec.beforeId);
+          if (command.spec.fit) {
+            const bounds = getLayerBounds(layer);
+            if (bounds) {
+              void queueCameraFit(bounds).catch((error: unknown) => {
+                console.error("[GeoLibre] Failed to fit an embedded layer", error);
+              });
+            }
+          }
           return layer.id;
         }
         case "addData": {
-          if (!mapAppAPI) throw new Error("The map is not ready yet");
+          const appAPI = mapAppAPIRef.current;
+          if (!appAPI) throw new Error("The map is not ready yet");
           const abort = new AbortController();
           dataLoadAborts.add(abort);
           const result = await queueDataLoad(() =>
-            loadDataUrl(mapAppAPI, command.url, {
+            loadDataUrl(appAPI, command.url, {
               styleUrl: command.styleUrl,
               signal: abort.signal,
               fit: command.fit,
@@ -276,11 +347,13 @@ export function useEmbedApi(
           return result.layerIds;
         }
         case "exportImage": {
+          await pendingCameraUpdate;
           const map = controller()?.getMap();
           if (!map) throw new Error("The map is not ready yet");
           return captureMapImage(map).image.toDataURL("image/png");
         }
         case "captureViewport": {
+          await pendingCameraUpdate;
           const map = controller()?.getMap();
           if (!map) throw new Error("The map is not ready yet");
           return captureWorkspaceViewportImage(map);
@@ -427,5 +500,5 @@ export function useEmbedApi(
       viewMap?.off("move", onMapMove);
       viewMap?.off("moveend", onMapMove);
     };
-  }, [mapControllerRef, mapAppAPI]);
+  }, [mapControllerRef]);
 }
