@@ -23,8 +23,10 @@ import { useThemeScheme } from "./hooks/useThemeScheme";
 import { useUiProfileBootstrap } from "./hooks/useUiProfileBootstrap";
 import { useUndoRedoShortcuts } from "./hooks/useUndoRedoShortcuts";
 import { useWhiteboxToolUrl } from "./hooks/useWhiteboxToolUrl";
+import { useEmbedApi } from "./hooks/useEmbedApi";
 import { createAppAPI } from "./hooks/usePlugins";
 import { languageDirection } from "./i18n/languages";
+import { appMapControllerRef } from "./lib/map-controller-ref";
 
 export default function App() {
   useLastBasemapPersistence();
@@ -39,6 +41,11 @@ export default function App() {
   // `?data=` loader's effect deps, and a changing identity would re-run that
   // one-shot import and duplicate its layers.
   const [mapAppAPI, setMapAppAPI] = useState<ReturnType<typeof createAppAPI> | null>(null);
+  // The host bridge belongs to the application root, not DesktopShell. A
+  // restoring startup project or another pre-shell guard must not make an
+  // embedded Workspace tab invisible to its host. Store-backed commands can
+  // arrive immediately; map-backed commands report their own readiness.
+  useEmbedApi(appMapControllerRef, mapAppAPI);
   const handleMapReady = useCallback((api: ReturnType<typeof createAppAPI>) => {
     setMapAppAPI((current) => current ?? api);
   }, []);
