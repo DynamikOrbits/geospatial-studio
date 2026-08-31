@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "app": {
-    "slug": "geospatial",
+    "slug": "geospatial-studio",
     "name": "Geospatial Studio",
     "url": "https://geospatial.dynamikorbits.com",
     "delivery": "hosted_web_application",

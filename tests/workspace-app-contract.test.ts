@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("GeoLibre declares and implements the Workspace app contract", async () => {
+test("Geospatial Studio declares and implements the Workspace app contract", async () => {
   const manifest = JSON.parse(await readFile(
     new URL("../apps/geolibre-desktop/public/.well-known/dynamik-app", import.meta.url),
     "utf8",
   ));
+  assert.equal(manifest.app.slug, "geospatial-studio");
   assert.deepEqual(manifest.app.technology, {
     language: "TypeScript",
     ui: "React",
@@ -28,6 +29,27 @@ test("GeoLibre declares and implements the Workspace app contract", async () => 
   });
   assert.equal(manifest.workspace_contract.shell, "dynamik.workspace.app-frame.v1");
 
+  const nginx = await readFile(
+    new URL("../docker/nginx.conf", import.meta.url),
+    "utf8",
+  );
+  for (const marker of [
+    "location = /.well-known/dynamik-app",
+    "default_type application/json",
+    "try_files $uri =404",
+  ]) {
+    assert.ok(nginx.includes(marker), `missing discovery route marker: ${marker}`);
+  }
+
+  const dockerfile = await readFile(
+    new URL("../Dockerfile", import.meta.url),
+    "utf8",
+  );
+  assert.ok(
+    dockerfile.includes("chmod -R a+rX /usr/share/nginx/html"),
+    "runtime image must make built discovery metadata readable by nginx",
+  );
+
   const bridge = await readFile(
     new URL("../apps/geolibre-desktop/src/lib/dynamik-workspace-app.ts", import.meta.url),
     "utf8",
@@ -43,7 +65,7 @@ test("GeoLibre declares and implements the Workspace app contract", async () => 
   }
 });
 
-test("GeoLibre derives one exact Workspace parent origin", async () => {
+test("Geospatial Studio derives one exact Workspace parent origin", async () => {
   const { resolveDynamikWorkspaceOrigin } = await import(
     "../apps/geolibre-desktop/src/lib/dynamik-workspace-app.js"
   );
