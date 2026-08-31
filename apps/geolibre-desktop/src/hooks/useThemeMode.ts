@@ -26,7 +26,19 @@ export function useThemeMode() {
     document.documentElement.style.colorScheme = themeMode;
   }, [themeMode]);
 
+  useLayoutEffect(() => {
+    const receiveWorkspaceTheme = (event: Event) => {
+      const detail = (event as CustomEvent<{ colorScheme?: unknown }>).detail;
+      if (detail?.colorScheme === "light" || detail?.colorScheme === "dark") {
+        setThemeMode(detail.colorScheme);
+      }
+    };
+    window.addEventListener("dynamik-workspace-theme", receiveWorkspaceTheme);
+    return () => window.removeEventListener("dynamik-workspace-theme", receiveWorkspaceTheme);
+  }, []);
+
   const toggleThemeMode = useCallback(() => {
+    if (document.documentElement.dataset.dynamikWorkspace === "true") return;
     setThemeMode((currentThemeMode) => (currentThemeMode === "dark" ? "light" : "dark"));
   }, []);
 
