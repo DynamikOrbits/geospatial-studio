@@ -158,6 +158,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
   && printf '# Basic Auth disabled (GEOLIBRE_AUTH_USER/GEOLIBRE_AUTH_PASSWORD not set).\n' > /etc/nginx/geolibre-auth.conf \
   && printf '# AI proxy disabled (GEOLIBRE_AI_URL not set).\n' > /etc/nginx/geolibre-ai-proxy.conf
 COPY --from=build /app/apps/geolibre-desktop/dist /usr/share/nginx/html
+RUN chmod -R a+rX /usr/share/nginx/html
 
 EXPOSE 80
 
