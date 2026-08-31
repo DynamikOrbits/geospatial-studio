@@ -12,6 +12,7 @@ export function useThemeScheme(): void {
   const customColor = useDesktopSettingsStore((state) => state.desktopSettings.theme.customColor);
 
   useLayoutEffect(() => {
+    if (document.documentElement.dataset.dynamikWorkspace === "true") return;
     applyThemeScheme(scheme, customColor);
   }, [scheme, customColor]);
 }

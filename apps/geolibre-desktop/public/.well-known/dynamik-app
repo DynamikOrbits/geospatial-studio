@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "app": {
+    "slug": "geospatial",
+    "name": "Geospatial Studio",
+    "url": "https://geospatial.dynamikorbits.com",
+    "delivery": "hosted_web_application",
+    "project_model": "project_file_and_url",
+    "lifecycle": "canonical",
+    "technology": {
+      "language": "TypeScript",
+      "ui": "React",
+      "application_framework": "Vite",
+      "styling": "Tailwind CSS"
+    }
+  },
+  "authentication": {
+    "browser": "public",
+    "agent": "dynamik_account_token"
+  },
+  "control": {
+    "canonical": "dynamik_capability_registry",
+    "api": "https://api.dynamikorbits.com/v1/agent/apps/open",
+    "mcp": "https://api.dynamikorbits.com/mcp",
+    "capability_ids": [
+      "agent.workspace.application.open",
+      "agent.workspace.application.status",
+      "agent.workspace.capture"
+    ]
+  },
+  "workspace_contract": {
+    "protocol": "dynamik.workspace.app",
+    "version": 1,
+    "theme": {
+      "inheritance": true,
+      "acknowledgement": true,
+      "preferences": ["system", "light", "dark"],
+      "presets": true
+    },
+    "capture": true,
+    "shell": "dynamik.workspace.app-frame.v1"
+  },
+  "views": {
+    "state": "project_file_and_url",
+    "parameters": {
+      "url": { "type": "string", "format": "uri" },
+      "data": { "type": "string", "format": "uri" }
+    }
+  }
+}

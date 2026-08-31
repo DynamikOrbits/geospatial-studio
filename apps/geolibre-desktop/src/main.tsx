@@ -68,6 +68,10 @@ import { installDiagnosticsCapture } from "./lib/diagnostics";
 import { isTauri } from "./lib/is-tauri";
 import { installStaleChunkReload } from "./lib/stale-chunk-reload";
 import { resolveAuthGate, type AuthGateConfig } from "./lib/auth-gate";
+import {
+  installDynamikWorkspaceAppBridge,
+  resolveDynamikWorkspaceOrigin,
+} from "./lib/dynamik-workspace-app";
 import { getInitialThemeMode } from "./hooks/useThemeMode";
 import { applyTemporaryDesktopSettings } from "./hooks/useDesktopSettings";
 import { isEmbedded } from "./hooks/embedHost";
@@ -78,6 +82,13 @@ import {
 } from "./lib/desktop-settings-url";
 
 installDiagnosticsCapture();
+if (window.parent !== window) {
+  const workspaceOrigin = resolveDynamikWorkspaceOrigin(
+    import.meta.env.VITE_DYNAMIK_WORKSPACE_ORIGIN,
+    document.referrer,
+  );
+  if (workspaceOrigin) installDynamikWorkspaceAppBridge({ workspaceOrigin });
+}
 // In the desktop build, route geocoding (place search / reverse geocode)
 // through Tauri's native HTTP client so it bypasses WebView CORS: public
 // Nominatim's CDN intermittently omits the CORS header on cached responses,
