@@ -1,7 +1,7 @@
 # Geospatial Studio
 
 [![Fork of GeoLibre](https://img.shields.io/badge/fork%20of-opengeos%2FGeoLibre-green.svg)](https://github.com/opengeos/GeoLibre)
-[![GeoLibre 2.8](https://img.shields.io/badge/GeoLibre-2.8.0-blue.svg)](https://github.com/opengeos/GeoLibre/releases/tag/v2.8.0)
+[![GeoLibre 2.9](https://img.shields.io/badge/GeoLibre-2.9.0-blue.svg)](https://github.com/opengeos/GeoLibre/releases/tag/v2.9.0)
 [![image](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Geospatial Studio** is [DynamikOrbits](https://github.com/DynamikOrbits)' fork of
@@ -39,7 +39,7 @@ The features, documentation, and hosted services below are upstream GeoLibre's
 work; apart from the branding and defaults above, they describe this fork
 accurately too.
 
-- **[GeoLibre 2.8.0](https://github.com/opengeos/GeoLibre/releases/tag/v2.8.0)** —
+- **[GeoLibre 2.9.0](https://github.com/opengeos/GeoLibre/releases/tag/v2.9.0)** —
   the upstream release currently integrated by this fork
 - **[GeoLibre Web](https://web.geolibre.app/)** — upstream's hosted build, the
   full app in your browser with nothing to install
