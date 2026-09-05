@@ -134,7 +134,9 @@ describe("basemapToCesiumImagery", () => {
 
   it("gives every raster analogue a credit and a zoom ceiling", () => {
     const imagery = asXyz(basemapToCesiumImagery(DEFAULT_BASEMAP));
-    assert.match(imagery.template, /\{z\}.*\{x\}.*\{y\}/);
+    // Fork default is OpenFreeMap Dark, whose Cesium analogue is a WMTS
+    // template ({z}/{y}/{x}), not the XYZ order upstream's Liberty uses.
+    assert.match(imagery.template, /\{z\}.*(\{x\}.*\{y\}|\{y\}.*\{x\})/);
     assert.ok(imagery.attribution.length > 0);
     assert.ok((imagery.maximumLevel ?? 0) > 0);
   });

@@ -148,6 +148,10 @@
     {
       "path": "tests/marker-categories.test.ts",
       "reason": "workspace-embed: assert generated sprites resolve missing style images before MapLibre warns, for capture fidelity."
+    },
+    {
+      "path": "tests/cesium-imagery.test.ts",
+      "reason": "branding-v1: DEFAULT_BASEMAP is OpenFreeMap Dark, whose Cesium analogue is WMTS {z}/{y}/{x}; the credit/zoom assertion must accept that template order."
     }
   ]
 }
