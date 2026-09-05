@@ -76,6 +76,78 @@
     {
       "path": "e2e/blend-modes.spec.ts",
       "reason": "branding-v1: pixel assertions wait for the remote dark basemap to settle and compare premultiplied-alpha Lighten against that dark backdrop rather than upstream's light-basemap normal composite."
+    },
+    {
+      "path": "Dockerfile",
+      "reason": "workspace-embed: world-readable static assets so the containerized web build can serve /.well-known/dynamik-app and the SPA to the Workspace host."
+    },
+    {
+      "path": "docker/nginx.conf",
+      "reason": "workspace-embed: serve /.well-known/dynamik-app as JSON outside the SPA fallback for Workspace discovery."
+    },
+    {
+      "path": "apps/geolibre-desktop/src/App.tsx",
+      "reason": "workspace-embed: mount the host postMessage bridge at the application root so a restoring startup project cannot hide the iframe from Workspace."
+    },
+    {
+      "path": "apps/geolibre-desktop/src/main.tsx",
+      "reason": "workspace-embed: install the Dynamik Workspace app bridge before React mounts so discovery and theme handshake work in a framed tab."
+    },
+    {
+      "path": "apps/geolibre-desktop/src/components/layout/DesktopShell.tsx",
+      "reason": "workspace-embed: share a module-scoped map controller ref with App so the embed transport survives DesktopShell unmount during startup guards."
+    },
+    {
+      "path": "apps/geolibre-desktop/src/hooks/useEmbedApi.ts",
+      "reason": "workspace-embed: expose the bridge before map readiness, wait for pending camera updates, and add captureViewport for Workspace screenshots; keep upstream capability gates."
+    },
+    {
+      "path": "apps/geolibre-desktop/src/lib/embed-api.ts",
+      "reason": "workspace-embed: add captureViewport and addLayer.fit to the framed host protocol."
+    },
+    {
+      "path": "packages/embed/src/index.ts",
+      "reason": "workspace-embed: AddLayerSpec.fit so the host SDK can request a camera fit after addLayer."
+    },
+    {
+      "path": "apps/geolibre-desktop/src/hooks/useLastBasemapPersistence.ts",
+      "reason": "workspace-embed: do not restore or write the last top-level basemap inside a framed Workspace view."
+    },
+    {
+      "path": "apps/geolibre-desktop/src/lib/last-basemap.ts",
+      "reason": "workspace-embed: shouldUseLastBasemapPersistence(embedded) isolates ephemeral embeds from host-wide basemap prefs."
+    },
+    {
+      "path": "apps/geolibre-desktop/src/hooks/useThemeMode.ts",
+      "reason": "workspace-embed: accept dynamik-workspace-theme events and refuse local theme toggles while framed by Workspace."
+    },
+    {
+      "path": "apps/geolibre-desktop/src/hooks/useThemeScheme.ts",
+      "reason": "workspace-embed: skip applying the desktop theme scheme while documentElement.dataset.dynamikWorkspace is set."
+    },
+    {
+      "path": "apps/geolibre-desktop/src/lib/print-layout-export.ts",
+      "reason": "workspace-embed: export MapLike so workspace-viewport-capture can reuse the print-layout screenshot path."
+    },
+    {
+      "path": "packages/map/src/generated-images.ts",
+      "reason": "workspace-embed: await generated sprite registration so Workspace viewport capture does not race missing marker images."
+    },
+    {
+      "path": "playwright.config.ts",
+      "reason": "workspace-embed: GEOLIBRE_E2E_PORT so embed e2e can share a port with the Workspace host without colliding."
+    },
+    {
+      "path": "tests/embed-api.test.ts",
+      "reason": "workspace-embed: cover addLayer.fit and captureViewport protocol parsing."
+    },
+    {
+      "path": "tests/last-basemap.test.ts",
+      "reason": "workspace-embed: assert embedded views do not inherit the top-level last-basemap preference."
+    },
+    {
+      "path": "tests/marker-categories.test.ts",
+      "reason": "workspace-embed: assert generated sprites resolve missing style images before MapLibre warns, for capture fidelity."
     }
   ]
 }
