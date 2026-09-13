@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "apps": [
+    {
+      "id": "geolibre",
+      "name": "GeoLibre",
+      "scope": "dynamikorbits",
+      "cwd": "apps/geolibre-desktop",
+      "port": 4708,
+      "health": {
+        "path": "/"
+      },
+      "command": [
+        "../../node_modules/.bin/vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "{port}",
+        "--strictPort"
+      ],
+      "requires": [
+        "node_modules"
+      ]
+    }
+  ]
+}

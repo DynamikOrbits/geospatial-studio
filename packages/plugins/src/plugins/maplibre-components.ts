@@ -2491,6 +2491,80 @@ export async function addZarrRasterLayer(
   return queueZarrAdd(() => addZarrLayerExclusively(app, options, url, variable));
 }
 
+/**
+ * Recreate the live renderer for Zarr records loaded from a saved project.
+ *
+ * A project stores the layer description, not the WebGL custom-layer instance
+ * owned by `ZarrLayerControl`. Re-adding through the normal path also restores
+ * the time-axis adapter; the saved visual state and selector binding are then
+ * moved onto the new live layer in the original stack position.
+ */
+export async function restoreZarrLayers(app: GeoLibreAppAPI): Promise<void> {
+  const initial = useAppStore.getState();
+  const wasDirty = initial.isDirty;
+  const savedLayers = initial.layers.filter(isZarrControlLayer);
+  for (const saved of savedLayers) {
+    if (zarrControl?.getLayersMap().has(saved.id)) continue;
+    const url = typeof saved.source.url === "string" ? saved.source.url : saved.sourcePath;
+    const variable =
+      typeof saved.source.variable === "string"
+        ? saved.source.variable
+        : typeof saved.metadata.variable === "string"
+          ? saved.metadata.variable
+          : "";
+    if (!url || !variable) continue;
+    const selector = saved.source.selector ?? saved.metadata.selector;
+    const clim = saved.source.clim ?? saved.metadata.clim;
+    const colormap = saved.source.colormap ?? saved.metadata.colormap;
+    const crs = saved.source.crs ?? saved.metadata.crs;
+    const proj4 = saved.source.proj4 ?? saved.metadata.proj4;
+    const bounds = saved.source.bounds;
+    const liveId = await addZarrRasterLayer(app, {
+      url,
+      variable,
+      name: saved.name,
+      opacity: saved.opacity,
+      ...(selector && typeof selector === "object"
+        ? { selector: selector as Record<string, number | string> }
+        : {}),
+      ...(Array.isArray(clim) && clim.length === 2 ? { clim: clim as [number, number] } : {}),
+      ...(typeof colormap === "string" || Array.isArray(colormap)
+        ? { colormap: colormap as string | string[] }
+        : {}),
+      ...(typeof crs === "string" ? { crs } : {}),
+      ...(typeof proj4 === "string" ? { proj4 } : {}),
+      ...(Array.isArray(bounds) && bounds.length === 4
+        ? { bounds: bounds as [number, number, number, number] }
+        : {}),
+    });
+    const state = useAppStore.getState();
+    const live = state.layers.find((layer) => layer.id === liveId);
+    const savedIndex = state.layers.findIndex((layer) => layer.id === saved.id);
+    if (!live || savedIndex < 0) continue;
+    const timeBinding = saved.metadata.timeBinding;
+    const restored: GeoLibreLayer = {
+      ...live,
+      name: saved.name,
+      visible: saved.visible,
+      opacity: saved.opacity,
+      style: saved.style,
+      ...(saved.groupId ? { groupId: saved.groupId } : {}),
+      metadata: {
+        ...saved.metadata,
+        ...live.metadata,
+        ...(timeBinding ? { timeBinding } : {}),
+      },
+    };
+    const next = state.layers.filter((layer) => layer.id !== saved.id && layer.id !== liveId);
+    next.splice(savedIndex, 0, restored);
+    useAppStore.setState({
+      layers: next,
+      selectedLayerId: state.selectedLayerId === saved.id ? liveId : state.selectedLayerId,
+      isDirty: wasDirty,
+    });
+  }
+}
+
 // One add at a time: see the queue comment on queueZarrAdd.
 let zarrAddQueue: Promise<void> = Promise.resolve();
 

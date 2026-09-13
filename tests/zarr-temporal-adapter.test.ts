@@ -5,6 +5,7 @@ import {
   __setComponentsModuleLoaderForTests,
   addCloudNetcdfLayer,
   addZarrRasterLayer,
+  restoreZarrLayers,
   type ComponentsModules,
 } from "../packages/plugins/src/plugins/maplibre-components.ts";
 import {
@@ -196,6 +197,57 @@ describe("a Zarr layer's temporal adapter", () => {
         Date.UTC(2020, 0, 4),
         Date.UTC(2020, 0, 5),
       ]);
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("recreates a saved Zarr layer and keeps its Time Slider binding", async () => {
+    const restoreFetch = installFetchStub({ units: "days since 2020-01-01" });
+    try {
+      const originalId = await addZarrRasterLayer(app, {
+        url: STORE_URL,
+        variable: "t2m",
+        name: "Saved climate cube",
+        selector: { time: 2 },
+        clim: [0, 1],
+        opacity: 0.7,
+      });
+      const original = useAppStore.getState().layers.find((layer) => layer.id === originalId);
+      assert.ok(original);
+      const binding = {
+        kind: "selector" as const,
+        dimension: "time",
+        min: Date.UTC(2020, 0, 1),
+        max: Date.UTC(2020, 0, 5),
+        granularity: "day" as const,
+      };
+      useAppStore.setState({
+        layers: [
+          {
+            ...original,
+            id: "saved-zarr-layer",
+            visible: false,
+            opacity: 0.7,
+            metadata: { ...original.metadata, timeBinding: binding },
+          },
+        ],
+        selectedLayerId: "saved-zarr-layer",
+        isDirty: false,
+      });
+
+      await restoreZarrLayers(app);
+
+      const layers = useAppStore.getState().layers;
+      assert.equal(layers.length, 1);
+      assert.notEqual(layers[0].id, "saved-zarr-layer");
+      assert.equal(layers[0].name, "Saved climate cube");
+      assert.equal(layers[0].visible, false);
+      assert.equal(layers[0].opacity, 0.7);
+      assert.deepEqual(layers[0].metadata.timeBinding, binding);
+      assert.equal(useAppStore.getState().selectedLayerId, layers[0].id);
+      assert.equal(useAppStore.getState().isDirty, false);
+      assert.ok(await waitForAdapter(layers[0].id));
     } finally {
       restoreFetch();
     }

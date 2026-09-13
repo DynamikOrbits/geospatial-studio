@@ -23,6 +23,7 @@ import {
   REVERSE_GEOCODE_PLUGIN_ID,
   restoreEffects,
   restoreLidarLayers,
+  restoreZarrLayers,
   restorePlanetaryComputerLayers,
   reattachSun,
   reattachRouteAnimation,
@@ -1260,6 +1261,11 @@ export function DesktopShell({
     restoreRasterLayers(appAPI);
     restorePlanetaryComputerLayers(appAPI);
     restoreVectorLayers(appAPI);
+    // Saved Zarr records need their renderer-owned WebGL layer and temporal
+    // adapter recreated before the Time Slider can drive them again.
+    void restoreZarrLayers(appAPI).catch((error: unknown) => {
+      console.warn("[zarr] failed to restore saved data cubes", error);
+    });
     // Re-bind saved ArcGIS feature layers to the viewport. Without this a
     // reopened project's layer stays frozen on the extent it was saved with.
     restoreArcGISViewportLayers(appAPI);

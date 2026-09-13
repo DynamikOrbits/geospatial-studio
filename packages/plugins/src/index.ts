@@ -134,6 +134,7 @@ export {
   addCloudNetcdfLayer,
   type CloudNetcdfLayerOptions,
   addZarrRasterLayer,
+  restoreZarrLayers,
   queryZarrLayer,
   setZarrLayerSelector,
   setZarrLocalStoreProvider,
