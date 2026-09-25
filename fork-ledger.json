@@ -87,19 +87,19 @@
     },
     {
       "path": "apps/geolibre-desktop/src/App.tsx",
-      "reason": "workspace-embed: mount the host postMessage bridge at the application root so a restoring startup project cannot hide the iframe from Workspace."
+      "reason": "workspace-embed: mount the host postMessage bridge at the application root, fed by the shell's map-ready generation, so a restoring startup project cannot hide the iframe from Workspace."
     },
     {
       "path": "apps/geolibre-desktop/src/main.tsx",
-      "reason": "workspace-embed: install the Dynamik Workspace app bridge before React mounts so discovery and theme handshake work in a framed tab."
+      "reason": "workspace-embed: install the Dynamik Workspace app bridge before React mounts so discovery and theme handshake work in a framed tab; skip service-worker registration when embedded (the isolated embed origin answers 410 for /sw.js)."
     },
     {
       "path": "apps/geolibre-desktop/src/components/layout/DesktopShell.tsx",
-      "reason": "workspace-embed: share a module-scoped map controller ref with App so the embed transport survives DesktopShell unmount during startup guards."
+      "reason": "workspace-embed: lend the shell's engine ref and map-ready generation to the App-level embed transport (useAppMapEngineBridge in src/lib/map-controller-ref.ts) instead of mounting useEmbedApi here, so the bridge survives DesktopShell being gated during startup."
     },
     {
       "path": "apps/geolibre-desktop/src/hooks/useEmbedApi.ts",
-      "reason": "workspace-embed: expose the bridge before map readiness, wait for pending camera updates, and add captureViewport for Workspace screenshots; keep upstream capability gates."
+      "reason": "workspace-embed: `ready` announces the transport before the map exists; the transport survives engine hand-offs (mapReadyGeneration re-arms only the camera listeners); addLayer.fit queues a MapEngine fit that exportImage/captureViewport wait for; captureViewport composites the full UI over the engine's render surface. Upstream capability gates kept."
     },
     {
       "path": "apps/geolibre-desktop/src/lib/embed-api.ts",
@@ -124,10 +124,6 @@
     {
       "path": "apps/geolibre-desktop/src/hooks/useThemeScheme.ts",
       "reason": "workspace-embed: skip applying the desktop theme scheme while documentElement.dataset.dynamikWorkspace is set."
-    },
-    {
-      "path": "apps/geolibre-desktop/src/lib/print-layout-export.ts",
-      "reason": "workspace-embed: export MapLike so workspace-viewport-capture can reuse the print-layout screenshot path."
     },
     {
       "path": "packages/map/src/generated-images.ts",

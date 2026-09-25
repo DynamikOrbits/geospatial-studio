@@ -26,7 +26,7 @@ import { useWhiteboxToolUrl } from "./hooks/useWhiteboxToolUrl";
 import { useEmbedApi } from "./hooks/useEmbedApi";
 import { createAppAPI } from "./hooks/usePlugins";
 import { languageDirection } from "./i18n/languages";
-import { appMapControllerRef } from "./lib/map-controller-ref";
+import { appMapControllerRef, useAppMapReadyGeneration } from "./lib/map-controller-ref";
 
 export default function App() {
   useLastBasemapPersistence();
@@ -45,7 +45,8 @@ export default function App() {
   // restoring startup project or another pre-shell guard must not make an
   // embedded Workspace tab invisible to its host. Store-backed commands can
   // arrive immediately; map-backed commands report their own readiness.
-  useEmbedApi(appMapControllerRef, mapAppAPI);
+  const mapReadyGeneration = useAppMapReadyGeneration();
+  useEmbedApi(appMapControllerRef, mapAppAPI, mapReadyGeneration);
   const handleMapReady = useCallback((api: ReturnType<typeof createAppAPI>) => {
     setMapAppAPI((current) => current ?? api);
   }, []);

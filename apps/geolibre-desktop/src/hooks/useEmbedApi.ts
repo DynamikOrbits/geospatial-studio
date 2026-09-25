@@ -1,7 +1,7 @@
 import { useAppStore } from "@geolibre/core";
 import { type RefObject, useEffect, useRef } from "react";
-import { getLayerBounds, type MapController } from "@geolibre/map";
-import { captureMapImage } from "../lib/print-layout-export";
+import { getLayerBounds, type MapEngine } from "@geolibre/map";
+import { imageBlobToDataUrl } from "@geolibre/map";
 import { captureWorkspaceViewportImage } from "../lib/workspace-viewport-capture";
 import {
   buildEmbedEvent,
@@ -19,6 +19,7 @@ import {
   type EmbedEventType,
 } from "../lib/embed-api";
 import { fetchProjectFromUrl, projectUrlFromLocation } from "../lib/project-url";
+import { shouldAwaitNativeMap } from "../lib/native-map-attach";
 import { resolveProjectXyzLayers } from "../lib/xyz-url";
 import { isKnownWhiteboxToolId } from "../lib/whitebox-tool-url";
 import { loadDataUrl } from "./useDataUrlLoader";
@@ -56,8 +57,13 @@ const VIEW_THROTTLE_MS = 250;
  *   MapCanvas and the other bridges), used to drive and read the camera.
  */
 export function useEmbedApi(
-  mapControllerRef: RefObject<MapController | null>,
+  mapControllerRef: RefObject<MapEngine | null>,
   mapAppAPI: ReturnType<typeof createAppAPI> | null,
+  /**
+   * Bumped whenever a canvas publishes an engine, so the view-listener attach
+   * re-arms on a hand-off — the ref itself is stable (#2268 review).
+   */
+  mapReadyGeneration: number,
 ): void {
   // Map readiness changes after the transport is mounted. Keep the newest API
   // behind a ref so that transition does not tear down the postMessage listener
@@ -66,6 +72,12 @@ export function useEmbedApi(
   useEffect(() => {
     mapAppAPIRef.current = mapAppAPI;
   }, [mapAppAPI]);
+  // The transport outlives engine hand-offs for the same reason, so a newly
+  // published engine re-arms only the camera listeners, not the whole bridge.
+  const rearmViewListenersRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    rearmViewListenersRef.current?.();
+  }, [mapReadyGeneration]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -144,7 +156,16 @@ export function useEmbedApi(
       return next;
     };
 
-    const waitForMapController = (): Promise<MapController> =>
+    // The engine for the current renderer, once it has a surface to draw on.
+    // During a renderer hand-off the shared ref can still aim at the outgoing
+    // engine, which must not receive a fit meant for its successor.
+    const liveEngine = (): MapEngine | null => {
+      const engine = controller();
+      if (!engine || engine.kind !== useAppStore.getState().primaryRenderer) return null;
+      return engine.getRenderSurface() ? engine : null;
+    };
+
+    const waitForMapEngine = (): Promise<MapEngine> =>
       new Promise((resolve, reject) => {
         const deadline = Date.now() + 120_000;
         const poll = () => {
@@ -152,9 +173,9 @@ export function useEmbedApi(
             reject(new Error("The embed session ended before the map was ready"));
             return;
           }
-          const map = controller();
-          if (map?.getMap()) {
-            resolve(map);
+          const engine = liveEngine();
+          if (engine) {
+            resolve(engine);
             return;
           }
           if (Date.now() >= deadline) {
@@ -168,24 +189,24 @@ export function useEmbedApi(
 
     const queueCameraFit = (bounds: [number, number, number, number]): Promise<void> => {
       const next = pendingCameraUpdate.catch(() => undefined).then(async () => {
-        const map = await waitForMapController();
-        const liveMap = map.getMap();
-        if (!liveMap) throw new Error("The map became unavailable before the layer could be fitted");
+        const engine = await waitForMapEngine();
         await new Promise<void>((resolve) => {
           let settled = false;
           let timeoutId = 0;
+          let stopListening: (() => void) | null = null;
           const finish = () => {
             if (settled) return;
             settled = true;
-            liveMap.off("moveend", finish);
+            stopListening?.();
             window.clearTimeout(timeoutId);
             resolve();
           };
-          liveMap.on("moveend", finish);
-          map.fitBounds(bounds);
+          stopListening = engine.onCameraIdle(finish);
+          if (settled) stopListening();
+          engine.fitBounds(bounds);
           // MapController's fit animation is 800 ms. Keep a bounded fallback
-          // for renderers that do not emit moveend (for example after a tab is
-          // backgrounded while the command is in flight).
+          // for renderers that do not report an idle camera (for example after
+          // a tab is backgrounded while the command is in flight).
           timeoutId = window.setTimeout(finish, 1_500);
         });
         // Let the settled camera/store changes paint before a capture requested
@@ -279,6 +300,11 @@ export function useEmbedApi(
             throw new Error("Missing project:edit capability");
           await loadProjectFromUrl(command.url);
           return;
+        case "getRenderer":
+          return useAppStore.getState().primaryRenderer;
+        case "setRenderer":
+          useAppStore.getState().setPrimaryRenderer(command.renderer);
+          return;
         case "setView":
           applySetView(command);
           return;
@@ -358,15 +384,15 @@ export function useEmbedApi(
           if (!useAppStore.getState().deploymentCapabilities.has("export:data"))
             throw new Error("Missing export:data capability");
           await pendingCameraUpdate;
-          const map = controller()?.getMap();
-          if (!map) throw new Error("The map is not ready yet");
-          return captureMapImage(map).image.toDataURL("image/png");
+          const engine = controller();
+          if (!engine) throw new Error("The map is not ready yet");
+          return imageBlobToDataUrl(await engine.captureImage());
         }
         case "captureViewport": {
           await pendingCameraUpdate;
-          const map = controller()?.getMap();
-          if (!map) throw new Error("The map is not ready yet");
-          return captureWorkspaceViewportImage(map);
+          const surface = controller()?.getRenderSurface();
+          if (!surface) throw new Error("The map is not ready yet");
+          return captureWorkspaceViewportImage(surface);
         }
       }
     };
@@ -404,12 +430,17 @@ export function useEmbedApi(
     // -- events --------------------------------------------------------------
 
     const store = useAppStore.getState();
+    let prevRenderer = store.primaryRenderer;
     let prevGeneration = store.projectGeneration;
     let prevSelectedLayer = store.selectedLayerId;
     let prevSelection = store.selectedFeatureIds.join(" ");
     const emittedRuns = new Set(store.processingHistory.map((run) => run.id));
 
     const unsubscribe = useAppStore.subscribe((state) => {
+      if (state.primaryRenderer !== prevRenderer) {
+        prevRenderer = state.primaryRenderer;
+        emit("rendererchange", { renderer: prevRenderer });
+      }
       if (state.projectGeneration !== prevGeneration) {
         prevGeneration = state.projectGeneration;
         emit("projectLoaded", {
@@ -450,7 +481,7 @@ export function useEmbedApi(
 
     // Camera events. The controller and its map appear asynchronously, so poll
     // animation frames until the map exists (same pattern as useCommandBridge).
-    let viewMap: ReturnType<MapController["getMap"]> | null = null;
+    let viewMap: ReturnType<MapEngine["getMap"]> | null = null;
     let lastViewAt = 0;
     let trailingTimer: number | null = null;
     const postView = () => {
@@ -485,7 +516,10 @@ export function useEmbedApi(
     };
     let rafId: number | null = null;
     const attach = () => {
-      const map = controller()?.getMap();
+      const engine = controller();
+      // Stops the poll once a map can no longer arrive; see the helper.
+      if (!shouldAwaitNativeMap(engine)) return;
+      const map = engine?.getMap();
       if (!map) {
         rafId = requestAnimationFrame(attach);
         return;
@@ -495,11 +529,24 @@ export function useEmbedApi(
       map.on("moveend", onMapMove);
     };
     rafId = requestAnimationFrame(attach);
+    // A renderer hand-off or a re-initialised map publishes a new engine. Move
+    // the camera listeners onto it without restarting the transport.
+    rearmViewListenersRef.current = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      viewMap?.off("move", onMapMove);
+      viewMap?.off("moveend", onMapMove);
+      viewMap = null;
+      rafId = requestAnimationFrame(attach);
+    };
 
+    // `ready` announces the transport, not the map: a host may enqueue
+    // store-backed commands immediately, and every map-backed command reports
+    // or waits for its own readiness (see above).
     emit("ready", { version: __GEOLIBRE_VERSION__ });
 
     return () => {
       disposed = true;
+      rearmViewListenersRef.current = null;
       window.removeEventListener("message", handleMessage);
       unsubscribe();
       loadAbort?.abort();
