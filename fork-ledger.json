@@ -150,6 +150,10 @@
       "reason": "workspace-embed: assert generated sprites resolve missing style images before MapLibre warns, for capture fidelity."
     },
     {
+      "path": "tests/fixtures/layer-sync-call-log.json",
+      "reason": "workspace-embed: the golden call log records generated-images.ts's missing-image resolver (setMissingStyleImageResolver) where upstream records the styleimagemissing listener — one line per scenario, render path otherwise identical. On a sync conflict, regenerate with UPDATE_CALL_LOGS=1 and oxfmt as the test's header describes."
+    },
+    {
       "path": "tests/cesium-imagery.test.ts",
       "reason": "branding-v1: DEFAULT_BASEMAP is OpenFreeMap Dark, whose Cesium analogue is WMTS {z}/{y}/{x}; the credit/zoom assertion must accept that template order."
     }

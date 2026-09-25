@@ -9,10 +9,12 @@ import { useDesktopSettingsPersistence } from "./hooks/useDesktopSettings";
 import { useLayoutOptions } from "./hooks/useLayoutOptions";
 import { useProjectUrlLoader } from "./hooks/useProjectUrlLoader";
 import { useDataUrlLoader } from "./hooks/useDataUrlLoader";
+import { useStacUrlLoader } from "./hooks/useStacUrlLoader";
 import { useBeforeUnloadGuard } from "./hooks/useBeforeUnloadGuard";
 import { useRecentProjectsPersistence } from "./hooks/useRecentProjectsPersistence";
 import { useLayerLibraryPersistence } from "./hooks/useLayerLibraryPersistence";
 import { useLastBasemapPersistence } from "./hooks/useLastBasemapPersistence";
+import { useLastRendererPersistence } from "./hooks/useLastRendererPersistence";
 import { useStyleLibraryPersistence } from "./hooks/useStyleLibraryPersistence";
 import { useTemplateLibraryPersistence } from "./hooks/useTemplateLibraryPersistence";
 import { useRuntimeEnvironmentVariables } from "./hooks/useRuntimeEnvironmentVariables";
@@ -30,6 +32,7 @@ import { appMapControllerRef, useAppMapReadyGeneration } from "./lib/map-control
 
 export default function App() {
   useLastBasemapPersistence();
+  useLastRendererPersistence();
   // Re-renders on language change, so Radix primitives (menus, sliders, tabs)
   // pick up the right-to-left direction together with the document `dir`.
   const { i18n, t } = useTranslation();
@@ -52,6 +55,7 @@ export default function App() {
   }, []);
   const projectUrlLoadState = useProjectUrlLoader();
   const dataUrlLoadState = useDataUrlLoader(mapAppAPI);
+  useStacUrlLoader(mapAppAPI, layoutOptions.viewer);
   const { showOnboarding, dismissOnboarding } = useUiProfileBootstrap();
   const { pending: pendingUpdate, remindLater, skipVersion } = useStartupUpdateCheck();
   useDesktopSettingsPersistence();

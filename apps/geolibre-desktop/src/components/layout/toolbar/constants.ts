@@ -40,7 +40,6 @@ export interface AddLayerHandlers {
 /** Shared styling/affordances passed to each toolbar menu's trigger button. */
 export interface ToolbarChrome {
   buttonClass: string;
-  secondaryButtonClass: string;
   buttonSize: "icon" | "sm";
   iconClassName: string;
   renderLabel: (label: string) => React.ReactNode;
@@ -109,6 +108,7 @@ export const ADD_DATA_KIND_COMMANDS: Array<{
   { kind: "delimited-text", titleKey: "toolbar.layerType.delimitedText" },
   { kind: "cad", titleKey: "toolbar.item.cadLayer" },
   { kind: "gpx", titleKey: "toolbar.layerType.gpx" },
+  { kind: "landxml", titleKey: "toolbar.layerType.landxml" },
   { kind: "mbtiles", titleKey: "toolbar.layerType.mbtiles" },
   { kind: "xyz", titleKey: "toolbar.layerType.xyz" },
   { kind: "wms", titleKey: "toolbar.layerType.wms" },
