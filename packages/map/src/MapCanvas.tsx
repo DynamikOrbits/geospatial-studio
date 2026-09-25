@@ -1311,7 +1311,10 @@ export const MapCanvas = memo(function MapCanvas({
         state.layers.find((layer) => layer.id === state.selectedLayerId),
         resolveHighlightIds(state),
       );
-      updateView();
+      // A camera animation already in flight (Set View, a fit) publishes its
+      // endpoint on moveend. Publishing its midpoint here would come back
+      // through the applyView effect below as a jumpTo that cancels the flight.
+      if (!map.isMoving()) updateView();
       onControllerReadyRef.current?.();
     });
 

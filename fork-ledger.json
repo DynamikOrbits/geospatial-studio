@@ -130,6 +130,10 @@
       "reason": "workspace-embed: await generated sprite registration so Workspace viewport capture does not race missing marker images."
     },
     {
+      "path": "packages/map/src/MapCanvas.tsx",
+      "reason": "fix: do not publish the camera on the map's `load` event while an animation is in flight — the applyView echo's jumpTo cancels it. The 2D default makes the basemap style land mid-flight routinely, cutting short Set View and Workspace addLayer.fit (upstream's globe default mostly hides the race)."
+    },
+    {
       "path": "playwright.config.ts",
       "reason": "workspace-embed: GEOLIBRE_E2E_PORT so embed e2e can share a port with the Workspace host without colliding."
     },
