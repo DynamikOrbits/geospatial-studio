@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { LAST_RENDERER_STORAGE_KEY } from "../apps/geolibre-desktop/src/lib/storage-keys";
 
 const HOST_PATH = "/__embed-api-host";
 const E2E_PORT = Number(process.env.GEOLIBRE_E2E_PORT ?? "4173");
@@ -320,4 +321,24 @@ test("fits an injected layer after cold map startup and captures the complete em
   // gray buttons occupied the toolbar and the injected blue points vanished.
   expect(captureProof.topToolbarDarkRatio).toBeGreaterThan(0.85);
   expect(captureProof.bluePixelCount).toBeGreaterThan(20);
+});
+
+test("does not inherit the last rendering engine inside an embed", async ({ page }) => {
+  // Another tab on this origin last chose the globe. Workspace owns what an
+  // embedded view shows, so the view must still open on the 2D map.
+  await page.addInitScript((key) => localStorage.setItem(key, "cesium"), LAST_RENDERER_STORAGE_KEY);
+
+  await page.goto("/?embed=1&welcome=0");
+
+  await expect(page.getByTestId("map-canvas")).toBeVisible();
+  await expect(page.locator(".maplibregl-canvas")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("primary-cesium")).toHaveCount(0);
+});
+
+test("does not record its rendering engine from inside an embed", async ({ page }) => {
+  await page.goto("/?embed=1&welcome=0");
+
+  await expect(page.locator(".maplibregl-canvas")).toBeVisible({ timeout: 30_000 });
+  const stored = await page.evaluate((key) => localStorage.getItem(key), LAST_RENDERER_STORAGE_KEY);
+  expect(stored).toBeNull();
 });

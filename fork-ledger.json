@@ -118,6 +118,10 @@
       "reason": "workspace-embed: shouldUseLastBasemapPersistence(embedded) isolates ephemeral embeds from host-wide basemap prefs."
     },
     {
+      "path": "apps/geolibre-desktop/src/hooks/useLastRendererPersistence.ts",
+      "reason": "workspace-embed: embedded views neither restore nor write the last rendering engine, matching the last-basemap isolation. Covered by e2e/embed-api.spec.ts."
+    },
+    {
       "path": "apps/geolibre-desktop/src/hooks/useThemeMode.ts",
       "reason": "workspace-embed: accept dynamik-workspace-theme events and refuse local theme toggles while framed by Workspace."
     },

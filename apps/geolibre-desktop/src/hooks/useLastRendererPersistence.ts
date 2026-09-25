@@ -1,10 +1,16 @@
 import { useAppStore } from "@geolibre/core";
 import { useLayoutEffect } from "react";
 import { readLastRenderer, writeLastRenderer } from "../lib/last-renderer";
+import { isEmbedded } from "./embedHost";
 
 /** Restore the last rendering engine into the empty startup workspace and track changes. */
 export function useLastRendererPersistence(): void {
   useLayoutEffect(() => {
+    // A framed view is isolated from host-wide map preferences, exactly like
+    // the last basemap (see useLastBasemapPersistence): it neither inherits
+    // the renderer another tab chose nor writes its own back.
+    if (isEmbedded()) return;
+
     const state = useAppStore.getState();
     const storedRenderer = readLastRenderer();
 
