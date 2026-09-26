@@ -139,7 +139,7 @@
     },
     {
       "path": "playwright.config.ts",
-      "reason": "workspace-embed: GEOLIBRE_E2E_PORT so embed e2e can share a port with the Workspace host without colliding."
+      "reason": "workspace-embed: GEOLIBRE_E2E_PORT so embed e2e can share a port with the Workspace host without colliding; the fork's own specs (embed-api, help-menu) join CORE_SPECS so they gate PRs instead of running only in the nightly features suite."
     },
     {
       "path": "tests/embed-api.test.ts",

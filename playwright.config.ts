@@ -30,6 +30,9 @@ const CORE_SPECS = [
   "pwa.spec.ts",
   "style-manager.spec.ts",
   "identify-restore.spec.ts",
+  // Geospatial Studio: the fork's own contracts gate every PR, not nightly.
+  "embed-api.spec.ts", // the Workspace embed protocol, capture and isolation
+  "help-menu.spec.ts", // product identity on the hosted app
 ];
 
 const coreMatch = CORE_SPECS.map((spec) => `**/${spec}`);
