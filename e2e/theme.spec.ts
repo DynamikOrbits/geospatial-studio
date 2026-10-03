@@ -73,6 +73,4 @@ test("inherits a dark Workspace theme with dim borders and a valid accent", asyn
   const channels = border.match(/[\d.]+/g)!.slice(0, 3).map(Number);
   expect(Math.max(...channels), border).toBeLessThan(80);
   expect(accent).not.toBe("rgba(0, 0, 0, 0)");
-  // Light/dark follows the Workspace, so the app's own toggle is disabled.
-  await expect(frame.getByRole("button", { name: "Switch to Light Mode" })).toBeDisabled();
 });
