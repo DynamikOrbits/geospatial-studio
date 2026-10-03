@@ -14,17 +14,17 @@ const THEME_TOKENS = new Set([
 
 const SHADCN_TOKEN_MAP: Record<string, string[]> = {
   "--surface-base": ["--background"],
-  "--text-primary": ["--foreground", "--card-foreground", "--popover-foreground"],
+  "--text-primary": ["--foreground", "--card-foreground", "--popover-foreground", "--accent-foreground"],
   "--surface-panel": ["--card"],
   "--surface-elevated": ["--popover"],
-  "--surface-hover": ["--secondary", "--muted"],
+  // shadcn --accent is the hover/selected surface, not the DS brand accent or a scrim.
+  "--surface-hover": ["--secondary", "--muted", "--accent"],
   "--text-secondary": ["--secondary-foreground"],
   "--text-muted": ["--muted-foreground"],
-  "--surface-overlay": ["--accent"],
   "--border-default": ["--border"],
   "--border-strong": ["--input"],
   "--accent": ["--primary"],
-  "--accent-fg": ["--primary-foreground", "--accent-foreground"],
+  "--accent-fg": ["--primary-foreground"],
   "--focus-ring": ["--ring"],
 };
 
