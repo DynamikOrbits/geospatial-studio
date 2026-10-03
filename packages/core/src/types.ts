@@ -303,6 +303,22 @@ export interface LabelStyle {
   /** Letter-case transform applied to the label text (MapLibre `text-transform`). */
   transform: LabelTransform;
   /**
+   * Render a numeric {@link field} with the locale's thousands and decimal
+   * separators (issue #2336), so `1234567.5` labels as `1,234,567.5` instead
+   * of running together. Non-numeric values are unaffected, and it is not
+   * applied to {@link expression}, which formats its own output (MapLibre's
+   * `number-format`, offered in the Expression Builder).
+   */
+  numberFormatEnabled: boolean;
+  /** Decimal places kept while {@link numberFormatEnabled} is on (0-10). */
+  numberDecimals: number;
+  /**
+   * BCP 47 tag picking the separators for {@link numberFormatEnabled}, from
+   * {@link LABEL_NUMBER_LOCALES}. Empty (the default) follows the app's own
+   * language, the way popup number fields do.
+   */
+  numberLocale: string;
+  /**
    * How to handle features that share a label.
    *
    * - `"off"`: every feature is labeled (the historical behavior).
@@ -539,6 +555,10 @@ export interface LayerStyle {
   pointRenderer: PointRenderer;
   heatmapRadius: number;
   heatmapIntensity: number;
+  /** Built-in color ramp used by the heatmap density renderer. */
+  heatmapColorRamp: string;
+  /** Numeric feature property used as heatmap weight; blank gives every point equal weight. */
+  heatmapWeightProperty: string;
   clusterRadius: number;
   clusterMaxZoom: number;
   /**
@@ -655,6 +675,9 @@ export const DEFAULT_LAYER_STYLE: LayerStyle = {
     rotation: 0,
     maxWidth: 10,
     transform: "none",
+    numberFormatEnabled: false,
+    numberDecimals: 0,
+    numberLocale: "",
     dedupe: "off",
     sizeExpression: "",
     colorExpression: "",
@@ -710,6 +733,8 @@ export const DEFAULT_LAYER_STYLE: LayerStyle = {
   pointRenderer: "single",
   heatmapRadius: 30,
   heatmapIntensity: 1,
+  heatmapColorRamp: "turbo",
+  heatmapWeightProperty: "",
   clusterRadius: 50,
   clusterMaxZoom: 14,
   invertedFillEnabled: false,
@@ -954,6 +979,21 @@ export interface LayerPopupConfig {
   bodyExpression?: string;
   /** `false` drops the synthetic `id` row. Defaults to `true`. */
   showFeatureId?: boolean;
+  /**
+   * Widest the click popup may grow, in CSS pixels. Unset keeps the default
+   * (520px, or 420px for a popup carrying an image). Clamped to the range
+   * `resolvePopupMaxWidth` enforces and always capped by the viewport, so a
+   * value wider than the window still leaves the map usable.
+   */
+  maxWidth?: number;
+  /**
+   * Tallest an `"image"` field's thumbnail may draw inside the popup, in CSS
+   * pixels. Unset keeps the default (`min(50vh, 420px)`). Clamped by
+   * `resolvePopupImageHeight`. Pair it with {@link maxWidth} for a
+   * bigger picture: the thumbnail keeps its aspect ratio, so widening the
+   * popup is what lets a landscape photo use the extra height.
+   */
+  imageHeight?: number;
   /**
    * The fields to show and their order. An empty or absent list keeps today's
    * behavior: every visible property, in the feature's own key order.
@@ -1236,6 +1276,14 @@ export interface GeoLibreLayer {
   /** Transient MapLibre expression applied by the iframe embed API. */
   embedFilter?: unknown[];
   /**
+   * Project-persisted boolean MapLibre expression that narrows the features
+   * rendered for this layer. Unlike a selection, this leaves the source data
+   * intact and keeps non-matching features hidden until the filter is cleared.
+   * It is composed with transient filters, quick filters, and rule visibility
+   * by the map renderers.
+   */
+  filterExpression?: unknown[];
+  /**
    * Data-driven filter controls authored in the layer's Quick Filters section
    * (issue #2114). Unlike {@link timeFilter} and {@link embedFilter} this is
    * persisted control *state*, not a compiled expression: `@geolibre/map`
@@ -1274,7 +1322,9 @@ export interface AddTileLayerOptions {
   tiles: string[];
   /**
    * Layer discriminator, controlling how the layer is labelled and (for WMS)
-   * dev-server proxied. Defaults to `"xyz"`.
+   * dev-server proxied. Defaults to `"xyz"`. The layer's `source.type` is
+   * always `"raster"`, so any other value (such as `"vector-tiles"` from an
+   * untyped JS caller) throws rather than persisting a mislabelled source.
    */
   type?: "xyz" | "wms" | "wmts" | "raster";
   /** Service or base URL recorded on the source for display and restore. */
@@ -1389,6 +1439,29 @@ export interface MapGridLayout {
 }
 
 /**
+ * Which engine draws a map pane.
+ *
+ * `"maplibre"` is the 2D MapLibre GL map that owns the app's plugin, styling,
+ * and deck.gl integrations. `"cesium"` is the 3D globe (see `CesiumCanvas`),
+ * which renders the same shared store state — camera, basemap, layers, group
+ * effects — through CesiumJS. `"mapbox"` is Mapbox GL JS and `"arcgis"` the
+ * ArcGIS Maps SDK for JavaScript, loaded from Esri's CDN at runtime (see
+ * `ArcgisCanvas`); both draw the same store state through their own engines.
+ *
+ * Used both for secondary panes ({@link SecondaryMapView.viewKind}) and for the
+ * primary workspace ({@link GeoLibreProject.primaryRenderer}), so the two never
+ * drift apart.
+ */
+export type MapRendererKind = "maplibre" | "cesium" | "mapbox" | "arcgis";
+
+/**
+ * The engine that draws the primary map area when a project says nothing. The
+ * 2D map: it is the renderer every tool, plugin, and panel is wired to, so an
+ * existing project (and a new one) opens exactly as it always did.
+ */
+export const DEFAULT_PRIMARY_RENDERER: MapRendererKind = "maplibre";
+
+/**
  * A non-primary map pane: shares the primary map's basemap and layers, with its
  * own camera and per-layer visibility overrides.
  */
@@ -1403,7 +1476,7 @@ export interface SecondaryMapView {
    * map) when absent, so existing projects and panes are unchanged. `"cesium"`
    * renders a 3D globe (see {@link CesiumCanvas}) over the same shared layers.
    */
-  viewKind?: "maplibre" | "cesium";
+  viewKind?: MapRendererKind;
   /**
    * Per-layer visibility overrides keyed by layer id. A layer absent from this
    * map inherits the primary map's visibility (`layer.visible`); an entry forces
@@ -1560,6 +1633,18 @@ export interface MapPreferences {
   showPointerElevation: boolean;
   /** Whether the built-in 3D terrain control and terrain surface are enabled. */
   terrainEnabled: boolean;
+  /** Mapbox-only style. New projects use Streets; absent follows the shared basemap. */
+  mapboxStyleUrl?: string;
+  /**
+   * ArcGIS-only basemap: an Esri basemap style id (`arcgis/streets`,
+   * `arcgis/imagery`, `osm/standard`, ...). New projects use Streets. Absent
+   * follows the shared basemap, translated to tiles the SDK can draw; the id
+   * is also set aside when no ArcGIS API key is configured, since Esri's
+   * basemap styles service requires one.
+   */
+  arcgisBasemap?: string;
+  /** Cesium imagery override; absent follows the shared project basemap. */
+  cesiumBasemap?: import("./cesium-imagery").CesiumBasemapId;
   /**
    * Notation the status bar reports the pointer coordinate in: `"dd"` decimal
    * degrees (default), `"dms"` degrees/minutes/seconds, `"ddm"` degrees and
@@ -1638,6 +1723,12 @@ export const DEFAULT_PROJECT_PREFERENCES: ProjectPreferences = {
     showPointerElevation: false,
     terrainEnabled: false,
     coordinateFormat: "dd",
+    mapboxStyleUrl: "mapbox://styles/mapbox/standard",
+    arcgisBasemap: "arcgis/streets",
+    // With an Ion token this is the globe's photographic default. The
+    // availability gate transparently falls back to the project basemap when
+    // no token is configured.
+    cesiumBasemap: "bing-aerial",
   },
   environmentVariables: [],
   geocoding: {
@@ -2257,6 +2348,17 @@ export interface GeoLibreProject {
   secondaryMapViews?: SecondaryMapView[];
   /** User-entered label for the primary pane; omitted when empty. */
   primaryMapLabel?: string;
+  /**
+   * Which engine draws the primary map area (issue #2217). Omitted for the
+   * default 2D map, so every project written before this existed — and every
+   * project that never leaves MapLibre — is byte-identical to before. A project
+   * saved as `"cesium"` reopens directly on the 3D globe.
+   *
+   * This is independent of {@link mapLayout}: a 1x1 workspace can be either
+   * renderer, and a multi-pane grid can still mix the two through each pane's
+   * {@link SecondaryMapView.viewKind}.
+   */
+  primaryRenderer?: MapRendererKind;
   /**
    * Project-scoped Style Manager entries (issue #1294), so a project can carry
    * its reusable styles to teammates. Omitted when empty; the app-level

@@ -1,3 +1,11 @@
+import { readControlPreference, writeControlPreference } from "../../lib/control-preferences";
+import {
+  SCRIPT_MAP_CONTROL_EVENT,
+  clearScriptMapControls,
+  forgetScriptMapControl,
+  type ScriptMapControlDetail,
+} from "../../lib/scripting/ui-controls";
+import { supportsAddDataRenderer } from "../../lib/add-data-renderer";
 import {
   DEFAULT_PROJECT_NAME,
   excludeHiddenFieldsFromProject,
@@ -5,9 +13,15 @@ import {
   serializeProject,
   useAppStore,
 } from "@geolibre/core";
-import { DEFAULT_BUILT_IN_CONTROL_VISIBILITY, type MapController } from "@geolibre/map";
+import {
+  DEFAULT_BUILT_IN_CONTROL_VISIBILITY,
+  resetPrimaryCesiumBuiltInControlState,
+  type MapEngine,
+} from "@geolibre/map";
+import { useMapCapabilities } from "../../hooks/useMapCapabilities";
 import {
   closeDuckDBLayerPanel,
+  isPluginEngineSupported,
   closeEarthEnginePanel,
   closeMaplibreComponentControls,
   closePlanetaryComputerPanel,
@@ -25,6 +39,7 @@ import {
   openThreeDTilesLayerPanel,
   openVectorLayerPanel,
   setAnnotationLabels,
+  setDimensionLabels,
   setBasemapControlLabels,
   setGeoEditorLabels,
   setGraticuleLabels,
@@ -36,6 +51,7 @@ import {
   setOlcLabels,
   setGeohashLabels,
   setTilecodeLabels,
+  setUsgsNldiLabels,
   setMapillaryLabels,
   setEarthdataGisLabels,
   setOpenAerialMapLabels,
@@ -123,7 +139,7 @@ import { pluginDisplayName } from "../../lib/plugin-display-name";
 import { masHidesDataSource } from "../../lib/mas-build";
 import { IS_STORE_BUILD } from "../../lib/updates";
 import { AddDataDialog, type AddDataKind } from "./AddDataDialog";
-import { serviceUrlParameter } from "../../lib/data-url";
+import { serviceUrlParameter, type ServiceUrlParameter } from "../../lib/data-url";
 import {
   OPEN_ADD_DATA_EVENT,
   type OpenAddDataDetail,
@@ -180,7 +196,7 @@ import {
 interface TopToolbarProps {
   compact?: boolean;
   diagnosticsErrorCount: number;
-  mapControllerRef: React.RefObject<MapController | null>;
+  mapControllerRef: React.RefObject<MapEngine | null>;
   mapReadyGeneration: number;
   showLabels?: boolean;
   showProjectInfo?: boolean;
@@ -285,6 +301,29 @@ export function TopToolbar({
       atPoint: t("annotations.atPoint"),
       pinnedToExtent: t("annotations.pinnedToExtent"),
     });
+    setDimensionLabels({
+      toolbar: t("dimensions.toolbar"),
+      collapse: t("sharedRail.collapse", { title: t("dimensions.toolbar") }),
+      expand: t("sharedRail.expand", { title: t("dimensions.toolbar") }),
+      layerName: t("dimensions.layerName"),
+      tools: {
+        linear: t("dimensions.tools.linear"),
+        angular: t("dimensions.tools.angular"),
+      },
+      unit: t("dimensions.unit"),
+      snap: t("dimensions.snap"),
+      color: t("dimensions.color"),
+      width: t("dimensions.width"),
+      widthOptions: {
+        thin: t("dimensions.widthOptions.thin"),
+        medium: t("dimensions.widthOptions.medium"),
+        thick: t("dimensions.widthOptions.thick"),
+      },
+      deleteLast: t("dimensions.deleteLast"),
+      clearAll: t("dimensions.clearAll"),
+      newLayer: t("dimensions.newLayer"),
+      confirmClearAll: (count) => t("dimensions.confirmClearAll", { count }),
+    });
     setMapillaryLabels({
       title: t("mapillary.title"),
       getTitle: () => i18n.t("mapillary.title"),
@@ -351,6 +390,7 @@ export function TopToolbar({
       search: t("arcgisHub.search"),
       searchCurrentView: t("arcgisHub.searchCurrentView"),
       enterKeyword: t("arcgisHub.enterKeyword"),
+      viewUnavailable: t("arcgisHub.viewUnavailable"),
       loadMore: t("arcgisHub.loadMore"),
       searching: t("arcgisHub.searching"),
       loadingMore: t("arcgisHub.loadingMore"),
@@ -851,6 +891,71 @@ export function TopToolbar({
       includeNeighbors: t("geohashPlugin.includeNeighbors"),
       includeParent: t("geohashPlugin.includeParent"),
     });
+    setUsgsNldiLabels({
+      panelTitle: t("usgsNldi.panelTitle"),
+      title: t("usgsNldi.title"),
+      hint: t("usgsNldi.hint"),
+      directionComplete: t("usgsNldi.directionComplete"),
+      directionUp: t("usgsNldi.directionUp"),
+      directionDown: t("usgsNldi.directionDown"),
+      basinButton: t("usgsNldi.basinButton"),
+      navigationPlaceholder: t("usgsNldi.navigationPlaceholder"),
+      navigationUpstreamMain: t("usgsNldi.navigationUpstreamMain"),
+      navigationUpstreamTributaries: t("usgsNldi.navigationUpstreamTributaries"),
+      navigationDownstreamMain: t("usgsNldi.navigationDownstreamMain"),
+      navigationDownstreamDiversions: t("usgsNldi.navigationDownstreamDiversions"),
+      sourcePlaceholder: t("usgsNldi.sourcePlaceholder"),
+      distancePlaceholder: t("usgsNldi.distancePlaceholder"),
+      navigationButton: t("usgsNldi.navigationButton"),
+      navigationButtonAgain: t("usgsNldi.navigationButtonAgain"),
+      exportButton: t("usgsNldi.exportButton"),
+      addLayersButton: t("usgsNldi.addLayersButton"),
+      clearButton: t("usgsNldi.clearButton"),
+      noComid: t("usgsNldi.noComid"),
+      requestingBasin: t("usgsNldi.requestingBasin"),
+      basinRendered: (comid) => t("usgsNldi.basinRendered", { comid }),
+      basinFailed: t("usgsNldi.basinFailed"),
+      selectNavigation: t("usgsNldi.selectNavigation"),
+      invalidDistance: t("usgsNldi.invalidDistance"),
+      discoveringSources: t("usgsNldi.discoveringSources"),
+      navigationUnavailable: t("usgsNldi.navigationUnavailable"),
+      noPlottableSource: t("usgsNldi.noPlottableSource"),
+      navigationEmpty: (source) => t("usgsNldi.navigationEmpty", { source }),
+      navigationAdded: (source, navigation, comid, km) =>
+        t("usgsNldi.navigationAdded", { source, navigation, comid, km }),
+      navigationFailed: t("usgsNldi.navigationFailed"),
+      tracing: t("usgsNldi.tracing"),
+      flowlineRendered: (comid, usedFallback) =>
+        comid
+          ? t(usedFallback ? "usgsNldi.flowlineFallbackComid" : "usgsNldi.flowlineComid", { comid })
+          : t(usedFallback ? "usgsNldi.flowlineFallback" : "usgsNldi.flowline"),
+      requestFailed: t("usgsNldi.requestFailed"),
+      nothingToAdd: t("usgsNldi.nothingToAdd"),
+      layersAdded: (count) => t("usgsNldi.layersAdded", { count }),
+      layerGroupName: t("usgsNldi.layerGroupName"),
+      layerFlowline: t("usgsNldi.layerFlowline"),
+      layerRaindrop: t("usgsNldi.layerRaindrop"),
+      layerSelectedPoint: t("usgsNldi.layerSelectedPoint"),
+      layerBasin: t("usgsNldi.layerBasin"),
+      layerNavigation: (index) => t("usgsNldi.layerNavigation", { index }),
+      resultCleared: t("usgsNldi.resultCleared"),
+      directionalUnavailable: t("usgsNldi.directionalUnavailable"),
+      noFlowlineNearby: t("usgsNldi.noFlowlineNearby"),
+      httpError: (status, detail) =>
+        detail
+          ? t("usgsNldi.httpErrorDetail", { status, detail })
+          : t("usgsNldi.httpError", { status }),
+      noAttributes: t("usgsNldi.noAttributes"),
+      catalogNames: {
+        ca_gages: t("usgsNldi.catalogCaGages"),
+        nwissite: t("usgsNldi.catalogNwisSite"),
+        nwisgw: t("usgsNldi.catalogNwisGw"),
+        gfv11_pois: t("usgsNldi.catalogGfv11Pois"),
+        huc12pp: t("usgsNldi.catalogHuc12pp"),
+        "nmwdi-st": t("usgsNldi.catalogNmwdiSt"),
+        flowlines: t("usgsNldi.catalogFlowlines"),
+      },
+    });
     setTilecodeLabels({
       title: t("tilecodePlugin.title"),
       getTitle: () => i18n.t("tilecodePlugin.title"),
@@ -1058,6 +1163,18 @@ export function TopToolbar({
   const setSegmentationOpen = useAppStore((s) => s.setSegmentationOpen);
   const setObjectDetectionOpen = useAppStore((s) => s.setObjectDetectionOpen);
   const setSegmentEverythingOpen = useAppStore((s) => s.setSegmentEverythingOpen);
+  // The globe owns the primary map, so the MapLibre-only entries below are dead
+  // while it is active and the View menu becomes the only way back to 2D (#2217).
+  const primaryRenderer = useAppStore((s) => s.primaryRenderer);
+  // Mapbox publishes its engine only after the initial style loads, and the
+  // ArcGIS engine once its view is ready. Before that, plugin panels cannot
+  // mount and their open requests would be lost. mapReadyGeneration rerenders
+  // this toolbar when the engine is published.
+  const addDataReady =
+    (primaryRenderer !== "mapbox" && primaryRenderer !== "arcgis") ||
+    mapControllerRef.current?.kind === primaryRenderer;
+  const cesiumPrimary = primaryRenderer === "cesium";
+  const capabilities = useMapCapabilities(mapControllerRef);
   const setSqlWorkspaceOpen = useAppStore((s) => s.setSqlWorkspaceOpen);
   const setLoadEditorFeaturesOpen = useAppStore((s) => s.setLoadEditorFeaturesOpen);
   const loadEditorFeaturesOpen = useAppStore((s) => s.ui.loadEditorFeaturesOpen);
@@ -1134,26 +1251,58 @@ export function TopToolbar({
   const [controlsVisible, setControlsVisible] = useState<Record<ToolbarMapControl, boolean>>(() =>
     MAP_CONTROL_ITEMS.reduce(
       (acc, { id }) => {
-        acc[id] = DEFAULT_BUILT_IN_CONTROL_VISIBILITY[id];
+        acc[id] =
+          id === "terrain" || id === "maptoolkit-logo"
+            ? DEFAULT_BUILT_IN_CONTROL_VISIBILITY[id]
+            : readControlPreference(id, DEFAULT_BUILT_IN_CONTROL_VISIBILITY[id]);
         return acc;
       },
       {} as Record<ToolbarMapControl, boolean>,
     ),
   );
+  // Restore optional chrome after startup and renderer replacement. Terrain is
+  // project state and the Maptoolkit logo follows attribution requirements.
+  useEffect(() => {
+    for (const { id } of MAP_CONTROL_ITEMS) {
+      if (id !== "terrain" && id !== "maptoolkit-logo")
+        mapControllerRef.current?.setBuiltInControlVisible(id, controlsVisible[id]);
+    }
+  }, [mapControllerRef, mapReadyGeneration, controlsVisible]);
+
+  // A script (the Jupyter widget's show_control/hide_control) toggles a control
+  // on the map directly; mirror it here so the Controls menu checkmark agrees
+  // and the effect above does not revert it on the next renderer swap. The
+  // choice is per session, so unlike a menu toggle it is not written to the
+  // device preference. Only the checkmark is mirrored here: re-applying the
+  // control to a new map belongs to `useScriptControlRestore`, since this
+  // toolbar is unmounted in `?maponly` embeds.
+  useEffect(() => {
+    const onScriptControl = (event: Event) => {
+      const { control, visible } = (event as CustomEvent<ScriptMapControlDetail>).detail;
+      setControlsVisible((current) =>
+        current[control] === visible ? current : { ...current, [control]: visible },
+      );
+    };
+    window.addEventListener(SCRIPT_MAP_CONTROL_EVENT, onScriptControl);
+    return () => window.removeEventListener(SCRIPT_MAP_CONTROL_EVENT, onScriptControl);
+  }, []);
+
   const terrainEnabled = useAppStore((state) => state.preferences.map.terrainEnabled);
 
-  // Terrain is project state, unlike the other optional map chrome. Restore it
-  // after both project loads and controller/style initialization so reopening a
-  // saved project brings back the control and its active terrain surface.
+  // Terrain is project state, unlike the other optional map chrome, so applying
+  // it to the map lives in `useTerrainRestore` (DesktopShell) — this toolbar is
+  // unmounted in `?maponly` embeds and must not own the restore. Only the
+  // checkbox mirrors that state here.
   useEffect(() => {
-    const controller = mapControllerRef.current;
-    if (!controller) return;
-    controller.setBuiltInControlVisible("terrain", terrainEnabled);
     setControlsVisible((current) =>
       current.terrain === terrainEnabled ? current : { ...current, terrain: terrainEnabled },
     );
-  }, [mapControllerRef, mapReadyGeneration, projectGeneration, terrainEnabled]);
-  const [initialService, setInitialService] = useState(() =>
+  }, [terrainEnabled]);
+  // `keyword` has no deep-link parameter — only the Browser panel's saved CSW
+  // entries carry one — so it widens the parsed shape rather than joining it.
+  const [initialService, setInitialService] = useState<
+    (ServiceUrlParameter & { keyword?: string | null }) | null
+  >(() =>
     viewer || typeof window === "undefined" ? null : serviceUrlParameter(window.location.search),
   );
   const [addDataKind, setAddDataKind] = useState<AddDataKind | null>(() => {
@@ -1197,6 +1346,19 @@ export function TopToolbar({
       // Reject kinds the Mac App Store build hides so a stray event cannot
       // open a dialog whose backing service is compiled out.
       if (detail?.kind && !masHidesDataSource(detail.kind)) {
+        setInitialService(
+          // An empty string is still a prefill (a saved CSW entry can carry a
+          // keyword and a blank endpoint); only a missing url means "no prefill".
+          detail.url !== undefined
+            ? {
+                kind: detail.kind,
+                url: detail.url,
+                layer: detail.layer ?? null,
+                styleUrl: null,
+                keyword: detail.keyword ?? null,
+              }
+            : null,
+        );
         setAddDataPostgres(detail.postgres);
         setAddDataTargetGroupId(detail.groupId ?? null);
         addDataInitialLayerIdsRef.current = new Set(
@@ -1245,6 +1407,11 @@ export function TopToolbar({
       resetMissingSettings: true,
     });
 
+    // The loops below reach only the live engine. The globe remembers its
+    // controls' corners across mounts, so clear that too, or a corner moved in
+    // the old project while Cesium was primary would come back the next time
+    // the globe mounts in this one.
+    resetPrimaryCesiumBuiltInControlState();
     for (const control of ALL_BUILT_IN_CONTROL_IDS) {
       mapControllerRef.current?.setBuiltInControlPosition(control, "top-right");
     }
@@ -1254,6 +1421,13 @@ export function TopToolbar({
         NEW_PROJECT_VISIBLE_BUILT_IN_CONTROLS.has(control),
       );
     }
+    // New Project resets every control to its default, so an earlier scripted
+    // override is spent: without this `useScriptControlRestore` would re-apply
+    // it to the live map on this same project-generation bump (parent effects
+    // run after this child's) and desync the map from the checkmarks reset
+    // just above. A widget project push does not come through here, so it
+    // still keeps the controls a script set.
+    clearScriptMapControls();
     setControlsVisible(newProjectToolbarControlVisibility());
   };
 
@@ -1261,14 +1435,25 @@ export function TopToolbar({
   // command palette so each panel opens identically from both.
   const addLayer: AddLayerHandlers = {
     vector: () => openVectorLayerPanel(appApi),
-    raster: () => openRasterLayerPanel(appApi),
+    raster: () =>
+      appApi.getMapRenderer?.() === "arcgis"
+        ? openAddDataKind("raster")
+        : openRasterLayerPanel(appApi),
     stac: () => {
       if (isActive(STAC_PLUGIN_ID)) openRightPanel(STAC_PLUGIN_ID);
       else toggle(STAC_PLUGIN_ID, appApi);
     },
     flatGeobuf: () => openFlatGeobufAddVectorLayerPanel(appApi),
-    pmtiles: () => openPMTilesLayerPanel(appApi),
-    zarr: () => openZarrLayerPanel(appApi),
+    pmtiles: () =>
+      appApi.getMapRenderer?.() === "arcgis"
+        ? openAddDataKind("pmtiles")
+        : openPMTilesLayerPanel(appApi),
+    // The ArcGIS view and the globe draw Zarr natively and have no Zarr control
+    // to open, so they take the Add Data form instead.
+    zarr: () =>
+      appApi.getMapRenderer?.() === "arcgis" || appApi.getMapRenderer?.() === "cesium"
+        ? openAddDataKind("zarr")
+        : openZarrLayerPanel(appApi),
     netcdf: () => setNetcdfDialogOpen(true),
     lidar: () => openLidarLayerPanel(appApi),
     splatting: () => openSplattingLayerPanel(appApi),
@@ -1281,7 +1466,13 @@ export function TopToolbar({
     const visible = !controlsVisible[control];
     const updated = mapControllerRef.current?.setBuiltInControlVisible(control, visible) ?? false;
     if (!updated) return;
+    // An explicit user choice revokes an earlier scripted one, so
+    // `useScriptControlRestore` stops forcing the scripted value back on the
+    // next renderer swap or project load.
+    forgetScriptMapControl(control);
     setControlsVisible((current) => ({ ...current, [control]: visible }));
+    if (control !== "terrain" && control !== "maptoolkit-logo")
+      writeControlPreference(control, visible);
     if (control === "terrain") {
       const { preferences, setPreferences } = useAppStore.getState();
       setPreferences({
@@ -1401,6 +1592,10 @@ export function TopToolbar({
           },
         ]
       : []),
+    // The composer captures through the engine's render surface, so it produces
+    // a preview on every renderer (#2475); it was gated on a MapLibre map back
+    // when it read that canvas directly (#2268 review), which left the menu item
+    // working while the palette had no entry at all.
     {
       id: "project.print-layout",
       title: t("toolbar.item.printLayoutEllipsis"),
@@ -1577,22 +1772,29 @@ export function TopToolbar({
             run: () => setSegmentationOpen(true),
           },
         ]),
-    {
-      id: "proc.objectDetection",
-      title: t("toolbar.command.objectDetection"),
-      group: t("toolbar.commandGroup.processing"),
-      keywords: "object detection yolo onnx ai detect imagery boxes",
-      icon: Sparkles,
-      run: () => setObjectDetectionOpen(true),
-    },
-    {
-      id: "proc.segmentEverything",
-      title: t("toolbar.command.segmentEverything"),
-      group: t("toolbar.commandGroup.processing"),
-      keywords: "segment everything slimsam sam automatic mask imagery polygons",
-      icon: Sparkles,
-      run: () => setSegmentEverythingOpen(true),
-    },
+    // Both panels read pixels off the MapLibre canvas; the palette has no
+    // disabled state, so drop the commands rather than offer two that silently
+    // do nothing (#2217 review). Gated on the capability, not the engine name.
+    ...(!capabilities.nativeMapInstance
+      ? []
+      : [
+          {
+            id: "proc.objectDetection",
+            title: t("toolbar.command.objectDetection"),
+            group: t("toolbar.commandGroup.processing"),
+            keywords: "object detection yolo onnx ai detect imagery boxes",
+            icon: Sparkles,
+            run: () => setObjectDetectionOpen(true),
+          },
+          {
+            id: "proc.segmentEverything",
+            title: t("toolbar.command.segmentEverything"),
+            group: t("toolbar.commandGroup.processing"),
+            keywords: "segment everything slimsam sam automatic mask imagery polygons",
+            icon: Sparkles,
+            run: () => setSegmentEverythingOpen(true),
+          },
+        ]),
     ...CONVERSION_COMMANDS.map(({ kind, titleKey }) => ({
       id: `proc.conversion.${kind}`,
       title: t(titleKey),
@@ -1706,6 +1908,11 @@ export function TopToolbar({
       run: panels.viewState.toggle,
     },
     // View
+    // All eight drive the shared engine's camera, which every engine
+    // implements — so they stay in the palette (and in the shortcut layer and
+    // cheat sheet this array also feeds) whichever renderer is live. They were
+    // dropped on the globe only because the ref was nulled there (#2217); it
+    // now points at the `CesiumEngine` (#2260).
     {
       id: "view.zoom-in",
       title: t("toolbar.command.zoomIn"),
@@ -1885,6 +2092,10 @@ export function TopToolbar({
         }),
         group: t("toolbar.commandGroup.plugins"),
         keywords: isActive(plugin.id) ? "plugin deactivate" : "plugin activate",
+        disabledReason:
+          !isActive(plugin.id) && !isPluginEngineSupported(plugin, primaryRenderer)
+            ? t("renderer.pluginUnsupported")
+            : undefined,
         run: () => toggle(plugin.id, appApi),
       })),
     // Settings
@@ -1938,10 +2149,29 @@ export function TopToolbar({
   const allowedCommands = useMemo(
     () =>
       filterCommandsByPrivileges(
-        filterCommandsByCapabilities(commands, deploymentCapabilities),
+        filterCommandsByCapabilities(
+          commands.filter(
+            (command) =>
+              !command.id.startsWith("add.") ||
+              (addDataReady &&
+                supportsAddDataRenderer(
+                  command.id.slice(4),
+                  primaryRenderer,
+                  capabilities.deckOverlay,
+                )),
+          ),
+          deploymentCapabilities,
+        ),
         appPrivileges,
       ),
-    [commands, deploymentCapabilities, appPrivileges],
+    [
+      commands,
+      deploymentCapabilities,
+      appPrivileges,
+      primaryRenderer,
+      addDataReady,
+      capabilities.deckOverlay,
+    ],
   );
   const shortcutCommands = useMemo(
     () =>
@@ -1958,17 +2188,11 @@ export function TopToolbar({
 
   const toolbarButtonSize = compact ? "icon" : "sm";
   const toolbarButtonClass = compact ? "h-8 w-8 shrink-0" : "shrink-0";
-  // Class for "secondary" toolbar menus that may be hidden on narrow screens to
-  // reduce toolbar wrapping. The menu stays reachable other ways (e.g. Edit's
-  // actions also have keyboard shortcuts). To make a future menu hideable, give
-  // its trigger Button this class instead of `toolbarButtonClass`.
-  const toolbarSecondaryButtonClass = cn(toolbarButtonClass, "hidden md:inline-flex");
   const toolbarIconClassName = cn("h-3.5 w-3.5", showLabels && "sm:me-1");
   const renderToolbarLabel = (label: string) =>
     showLabels ? <span className="hidden sm:inline">{label}</span> : null;
   const chrome: ToolbarChrome = {
     buttonClass: toolbarButtonClass,
-    secondaryButtonClass: toolbarSecondaryButtonClass,
     buttonSize: toolbarButtonSize,
     iconClassName: toolbarIconClassName,
     renderLabel: renderToolbarLabel,
@@ -1977,11 +2201,10 @@ export function TopToolbar({
   return (
     <header
       className={cn(
-        "ds-topbar flex min-h-11 min-w-0 shrink-0 items-center gap-1 border-b bg-card py-1",
-        compact
-          ? "flex-nowrap overflow-x-auto px-1.5"
-          : // Wrap below md; scroll a single row at md+ so tablets reach every menu (#871).
-            "flex-wrap px-2 md:flex-nowrap md:overflow-x-auto",
+        // One row at every width: menus that don't fit scroll horizontally
+        // instead of wrapping onto a second row (#871).
+        "ds-topbar flex min-h-11 min-w-0 shrink-0 flex-nowrap items-center gap-1 overflow-x-auto border-b bg-card py-1",
+        compact ? "px-1.5" : "px-2",
       )}
     >
       <BrandMark showName={showProjectInfo} />
@@ -2016,36 +2239,58 @@ export function TopToolbar({
       {!viewer && isMenuVisible(uiProfile, "edit") && (
         <EditMenu chrome={chrome} mapControllerRef={mapControllerRef} />
       )}
-      {isMenuVisible(uiProfile, "view") && (
+      {/* `|| primaryRenderer !== "maplibre"`: an admin or custom profile can hide
+          the whole "view" menu via `hiddenMenus`, which ViewMenu's own item-level
+          override cannot defeat. Hiding it while a project opens on another
+          renderer (the Cesium globe or Mapbox) would strand the user there with
+          no path back to MapLibre, so the menu stays mounted and renders only
+          the Rendering engine submenu (#2217 review). */}
+      {(isMenuVisible(uiProfile, "view") || primaryRenderer !== "maplibre") && (
         <ViewMenu
           chrome={chrome}
           history={viewportHistory}
+          // Engine-neutral: the camera comes from `readView()`, and the zoom
+          // limits from the project preferences both engines apply — MapLibre
+          // through `setMinZoom`/`setMaxZoom`, the globe by clamping in
+          // `animateTo`. Reading them off the MapLibre map would report `null`
+          // on the globe and leave Zoom In/Out never showing as "at limit".
           getCamera={() => {
-            const map = mapControllerRef.current?.getMap();
-            if (!map) return null;
+            const engine = mapControllerRef.current;
+            const view = engine?.readView();
+            if (!view) return null;
+            // Prefer the limits the engine actually enforces: MapLibre's
+            // effective minZoom is raised above the raw preference when
+            // `restrictBounds` is set, so reading the preference alone would
+            // leave Zoom Out enabled at the true floor (#2268 review). The
+            // preference is the fallback for an engine with no native map,
+            // which clamps to it directly.
+            const map = engine?.getMap();
+            const { map: mapPreferences } = useAppStore.getState().preferences;
             return {
-              zoom: map.getZoom(),
-              bearing: map.getBearing(),
-              pitch: map.getPitch(),
-              minZoom: map.getMinZoom(),
-              maxZoom: map.getMaxZoom(),
+              zoom: view.zoom,
+              bearing: view.bearing,
+              pitch: view.pitch,
+              minZoom: map ? map.getMinZoom() : mapPreferences.minZoom,
+              maxZoom: map ? map.getMaxZoom() : mapPreferences.maxZoom,
             };
           }}
           onResetNorth={() => mapControllerRef.current?.resetNorth()}
           onResetPitch={() => mapControllerRef.current?.resetPitch()}
           onResetPitchBearing={() => mapControllerRef.current?.resetNorthPitch()}
           onSetView={() => setSetViewOpen(true)}
+          // `readView()`, not `getMap()`: both hand-offs only need a camera, which
+          // every engine reports, and the MapLibre escape hatch is `null` on the
+          // globe — which would have made these silently do nothing now that the
+          // menu no longer greys them out (#2268 review).
           onViewInGoogleEarth={() => {
-            const map = mapControllerRef.current?.getMap();
-            if (!map) return;
-            const center = map.getCenter();
-            void openExternalLink(googleEarthUrl(center.lat, center.lng, map.getZoom()));
+            const view = mapControllerRef.current?.readView();
+            if (!view) return;
+            void openExternalLink(googleEarthUrl(view.center[1], view.center[0], view.zoom));
           }}
           onViewInGoogleMaps={() => {
-            const map = mapControllerRef.current?.getMap();
-            if (!map) return;
-            const center = map.getCenter();
-            void openExternalLink(googleMapsUrl(center.lat, center.lng, map.getZoom()));
+            const view = mapControllerRef.current?.readView();
+            if (!view) return;
+            void openExternalLink(googleMapsUrl(view.center[1], view.center[0], view.zoom));
           }}
           onZoomIn={() => mapControllerRef.current?.zoomIn()}
           onZoomOut={() => mapControllerRef.current?.zoomOut()}
@@ -2059,9 +2304,11 @@ export function TopToolbar({
       />
       {!viewer && isMenuVisible(uiProfile, "addData") && deploymentCapabilities.has("data:add") && (
         <AddDataMenu
+          disabled={!addDataReady}
           chrome={chrome}
           addLayer={addLayer}
           osmPbfBusy={osmPbf.busy}
+          cesiumPrimary={cesiumPrimary}
           onSetAddDataKind={openAddDataKind}
           onAddGltfModel={() => {
             setAddDataDeckVizKind("scenegraph");
@@ -2179,6 +2426,7 @@ export function TopToolbar({
           open={gpsTrackingOpen}
           onOpenChange={setGpsTrackingOpen}
           mapControllerRef={mapControllerRef}
+          mapReadyGeneration={mapReadyGeneration}
         />
       )}
       <RecordTourDialog
@@ -2195,6 +2443,7 @@ export function TopToolbar({
         open={georeferencerOpen}
         onOpenChange={setGeoreferencerOpen}
         mapControllerRef={mapControllerRef}
+        mapReadyGeneration={mapReadyGeneration}
       />
       <SetViewDialog
         open={setViewOpen}
@@ -2235,7 +2484,9 @@ export function TopToolbar({
       <ProjectGalleryDialog
         open={galleryDialogOpen}
         onOpenChange={setGalleryDialogOpen}
-        onOpenProject={(url, authToken) => projectFiles.openProjectFromShareUrl(url, { authToken })}
+        onOpenProject={(url, authToken, options) =>
+          projectFiles.openProjectFromShareUrl(url, { authToken, ...options })
+        }
       />
       {isMenuVisible(uiProfile, "help") && (
         <HelpMenu
@@ -2269,6 +2520,10 @@ export function TopToolbar({
         initialStyleUrl={
           addDataKind === initialService?.kind ? (initialService.styleUrl ?? undefined) : undefined
         }
+        initialKeyword={
+          addDataKind === initialService?.kind ? (initialService.keyword ?? undefined) : undefined
+        }
+        targetGroupId={addDataTargetGroupId}
         onOpenChange={(open: boolean) => {
           if (!open) {
             if (addDataTargetGroupId) {

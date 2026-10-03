@@ -9,15 +9,15 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import * as maplibregl from "maplibre-gl";
 import {
   type GeocodeMatch,
   geocodeForward,
   geocoderMinIntervalMs,
   resolveGeocoderConfig,
   useAppStore,
+  useLayersWhen,
 } from "@geolibre/core";
-import type { MapController } from "@geolibre/map";
+import type { MapEngine } from "@geolibre/map";
 import { Input } from "@geolibre/ui";
 import { Hexagon, Loader2, LocateFixed, MapPin, Search, Table2, X } from "lucide-react";
 import { formatLatLon, parseLatLon } from "../../lib/coordinates";
@@ -32,7 +32,7 @@ import {
 } from "../../lib/feature-search";
 
 interface LayerPanelPlaceSearchProps {
-  mapControllerRef: RefObject<MapController | null>;
+  mapControllerRef: RefObject<MapEngine | null>;
 }
 
 /** Fast-UI minimum debounce before firing a forward-geocode while typing. */
@@ -51,12 +51,6 @@ const MAX_RESULTS = 6;
  * `searchLayerFeatures` enforces itself.
  */
 const MIN_QUERY_LENGTH = 2;
-/** Ephemeral map ids for the outline drawn around a searched H3 cell. */
-const H3_SOURCE_ID = "geolibre-h3-search-cell";
-const H3_FILL_LAYER_ID = "geolibre-h3-search-cell-fill";
-const H3_LINE_LAYER_ID = "geolibre-h3-search-cell-line";
-/** Highlight color for the H3 cell, matching the place-search marker. */
-const H3_HIGHLIGHT_COLOR = "#ef4444";
 
 type SearchStatus = "idle" | "loading" | "error" | "empty";
 
@@ -97,16 +91,18 @@ export function LayerPanelPlaceSearch({
   // Per-instance id so multiple mounts never collide on the aria-controls link.
   const resultsId = `${useId()}-results`;
   const geocodingPrefs = useAppStore((s) => s.preferences.geocoding);
-  const layers = useAppStore((s) => s.layers);
   const layerGroups = useAppStore((s) => s.layerGroups);
   const [query, setQuery] = useState("");
+  // The layers are only scanned for a query long enough to search features, so
+  // subscribe to them only then; an empty box ignores layer edits entirely.
+  const layers = useLayersWhen(query.trim().length >= MIN_FEATURE_QUERY_LENGTH);
   const [placeRows, setPlaceRows] = useState<SearchRow[]>([]);
   const [featureGroups, setFeatureGroups] = useState<FeatureSearchGroup[]>([]);
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<SearchStatus>("idle");
   const [activeIndex, setActiveIndex] = useState(-1);
   const abortRef = useRef<AbortController | null>(null);
-  const markerRef = useRef<maplibregl.Marker | null>(null);
+  const searchDisposeRef = useRef<(() => void) | null>(null);
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // `open` read by the local scan's gate. It is a ref rather than a dependency
@@ -136,29 +132,18 @@ export function LayerPanelPlaceSearch({
     return Math.max(DEBOUNCE_MS, geocoderMinIntervalMs(endpoint));
   }, [geocodingPrefs]);
 
-  /**
-   * Remove the H3 cell outline from the map, if one is currently drawn. Safe to
-   * call when the map is gone or was never given the highlight (style reloads
-   * drop it), so callers never have to track whether it exists.
-   */
-  const clearH3Highlight = useCallback(() => {
-    const map = mapControllerRef.current?.getMap();
-    if (!map) return;
-    for (const layerId of [H3_FILL_LAYER_ID, H3_LINE_LAYER_ID]) {
-      if (map.getLayer(layerId)) map.removeLayer(layerId);
-    }
-    if (map.getSource(H3_SOURCE_ID)) map.removeSource(H3_SOURCE_ID);
-  }, [mapControllerRef]);
+  const clearSearchResult = useCallback(() => {
+    searchDisposeRef.current?.();
+    searchDisposeRef.current = null;
+  }, []);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    return () => {
       abortRef.current?.abort();
-      markerRef.current?.remove();
-      clearH3Highlight();
+      clearSearchResult();
       if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
-    },
-    [clearH3Highlight],
-  );
+    };
+  }, [clearSearchResult]);
 
   const runSearch = useCallback(
     async (text: string) => {
@@ -329,13 +314,11 @@ export function LayerPanelPlaceSearch({
 
   const handleSelect = useCallback(
     (row: SearchRow) => {
-      const map = mapControllerRef.current?.getMap();
+      const engine = mapControllerRef.current;
       // Drop the previous marker and cell outline unconditionally so neither is
       // ever orphaned when the map is briefly unavailable (mount/teardown/
       // headless) or when the next result is of a different kind.
-      markerRef.current?.remove();
-      markerRef.current = null;
-      clearH3Highlight();
+      clearSearchResult();
 
       // A place, a coordinate, or a cell takes the box's attention off the
       // feature it had selected, so release that selection the way clearing the
@@ -371,52 +354,45 @@ export function LayerPanelPlaceSearch({
         return;
       }
 
-      if (map && row.kind === "h3") {
-        // An H3 cell spans anything from a continent (resolution 0) to under a
-        // square meter (resolution 15), so frame the cell itself rather than
-        // flying to a fixed zoom, and outline it so the match is visible.
-        map.addSource(H3_SOURCE_ID, {
-          type: "geojson",
-          data: {
-            type: "Feature",
-            properties: { h3: row.cell.cell, resolution: row.cell.resolution },
-            geometry: { type: "Polygon", coordinates: [row.cell.boundary] },
-          },
-        });
-        map.addLayer({
-          id: H3_FILL_LAYER_ID,
-          type: "fill",
-          source: H3_SOURCE_ID,
-          paint: { "fill-color": H3_HIGHLIGHT_COLOR, "fill-opacity": 0.15 },
-        });
-        map.addLayer({
-          id: H3_LINE_LAYER_ID,
-          type: "line",
-          source: H3_SOURCE_ID,
-          paint: { "line-color": H3_HIGHLIGHT_COLOR, "line-width": 2 },
-        });
-        const bounds = new maplibregl.LngLatBounds();
-        for (const position of row.cell.boundary) bounds.extend(position);
-        map.fitBounds(bounds, { padding: 60 });
-      } else if (map) {
-        map.flyTo({
-          center: [row.match.lon, row.match.lat],
-          zoom: Math.max(map.getZoom(), 12),
-        });
-        markerRef.current = new maplibregl.Marker({ color: H3_HIGHLIGHT_COLOR })
-          .setLngLat([row.match.lon, row.match.lat])
-          .addTo(map);
+      if (engine) {
+        if (row.kind === "h3") {
+          searchDisposeRef.current = engine.showSearchResult({
+            type: "Polygon",
+            coordinates: [row.cell.boundary],
+          });
+          const longitudes = row.cell.boundary.map((p) => p[0]);
+          const latitudes = row.cell.boundary.map((p) => p[1]);
+          engine.fitBounds([
+            Math.min(...longitudes),
+            Math.min(...latitudes),
+            Math.max(...longitudes),
+            Math.max(...latitudes),
+          ]);
+        } else {
+          const center: [number, number] = [row.match.lon, row.match.lat];
+          searchDisposeRef.current = engine.showSearchResult({
+            type: "Point",
+            coordinates: center,
+          });
+          if (engine.kind === "cesium") {
+            // Preserve the globe's existing instant placement. Its animated
+            // camera path differs in flat scene modes; search previously used
+            // the store's applyView path rather than a flight there.
+            const store = useAppStore.getState();
+            store.setMapView({ center, zoom: Math.max(store.mapView.zoom, 12) });
+          } else {
+            engine.flyTo({ center, zoom: Math.max(engine.readView().zoom, 12) });
+          }
+        }
       }
       settle(row.match.displayName);
     },
-    [clearH3Highlight, mapControllerRef, settle],
+    [clearSearchResult, mapControllerRef, settle],
   );
 
   const handleClear = useCallback(() => {
     abortRef.current?.abort();
-    markerRef.current?.remove();
-    markerRef.current = null;
-    clearH3Highlight();
+    clearSearchResult();
     // Clearing the box clears what the box put on the map, and a picked feature
     // row leaves a live selection behind. Dropping it here takes the highlight
     // overlay with it, through the store rather than by touching MapLibre. Only
@@ -433,7 +409,7 @@ export function LayerPanelPlaceSearch({
     setActiveIndex(-1);
     setStatus("idle");
     setOpen(false);
-  }, [clearH3Highlight]);
+  }, [clearSearchResult]);
 
   const hasRows = rows.length > 0;
 

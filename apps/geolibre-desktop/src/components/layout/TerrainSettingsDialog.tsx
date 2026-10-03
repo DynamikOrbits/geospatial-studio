@@ -1,10 +1,11 @@
+import { useAppStore, useLayersWhen } from "@geolibre/core";
 import {
   CogDemError,
   DEFAULT_TERRAIN_EXAGGERATION,
   TERRAIN_SETTINGS_CLOSE_EVENT,
   TERRAIN_SETTINGS_EVENT,
   type CogDemErrorCode,
-  type MapController,
+  type MapEngine,
 } from "@geolibre/map";
 import {
   Button,
@@ -15,9 +16,10 @@ import {
   DialogTitle,
   Input,
   Label,
+  Select,
   Slider,
 } from "@geolibre/ui";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   clampExaggeration,
@@ -25,9 +27,13 @@ import {
   MAX_EXAGGERATION,
   MIN_EXAGGERATION,
 } from "../../lib/terrain-exaggeration";
+import { terrainRasterLayerOptions } from "../../lib/terrain-raster-layer";
+import { useMapCapabilities } from "../../hooks/useMapCapabilities";
 
 // Default sourced from the map package so it can't drift from the control's.
 const DEFAULT_EXAGGERATION = DEFAULT_TERRAIN_EXAGGERATION;
+
+type TerrainSourceAction = "url" | "file" | "layer" | "default";
 
 // @geolibre/map is i18n-agnostic and throws English messages, so the failure
 // kinds it tags are mapped to the catalog here rather than shown verbatim.
@@ -38,7 +44,7 @@ const SOURCE_ERROR_KEYS = {
 } as const satisfies Record<CogDemErrorCode, string>;
 
 export interface TerrainSettingsDialogProps {
-  mapControllerRef: React.RefObject<MapController | null>;
+  mapControllerRef: React.RefObject<MapEngine | null>;
 }
 
 /**
@@ -49,16 +55,27 @@ export interface TerrainSettingsDialogProps {
  */
 export function TerrainSettingsDialog({ mapControllerRef }: TerrainSettingsDialogProps) {
   const { t } = useTranslation();
+  // Not every engine can take a DEM of its own: mapbox-gl has no `raster-dem`
+  // source a COG can back, so `setTerrainCogSource` there returns false and the
+  // whole section used to accept a URL, a file or a layer and then do nothing at
+  // all — no change, no error (#2475). Hide it instead of letting it fail
+  // quietly; the exaggeration slider above still applies.
+  const { terrainSource: terrainSourceSupported } = useMapCapabilities(mapControllerRef);
   const [open, setOpen] = useState(false);
   const [exaggeration, setExaggeration] = useState(DEFAULT_EXAGGERATION);
   const [terrainUrl, setTerrainUrl] = useState("");
-  const [sourceLoading, setSourceLoading] = useState(false);
+  const [rasterLayerId, setRasterLayerId] = useState("");
+  const [sourceLoading, setSourceLoading] = useState<TerrainSourceAction | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
   // Free-text draft for the number input so a fractional value like "2.5" can be
   // typed without the controlled numeric value snapping the field mid-keystroke.
   // Committed (parsed/clamped) on blur or Enter; kept in sync when the value
   // changes elsewhere (slider, dialog open, reset).
   const [draft, setDraft] = useState(String(DEFAULT_EXAGGERATION));
+  // Layers are only read while the dialog is open, so layer edits made with it
+  // closed do not re-render it; handleOpen reads the store directly to seed.
+  const layers = useLayersWhen(open);
+  const rasterLayerOptions = useMemo(() => terrainRasterLayerOptions(layers), [layers]);
   useEffect(() => setDraft(String(exaggeration)), [exaggeration]);
 
   useEffect(() => {
@@ -74,14 +91,19 @@ export function TerrainSettingsDialog({ mapControllerRef }: TerrainSettingsDialo
       );
       setExaggeration(value);
       setDraft(String(value));
-      setTerrainUrl(mapControllerRef.current?.getTerrainCogSource() ?? "");
+      const currentSource = mapControllerRef.current?.getTerrainCogSource() ?? "";
+      const currentLayer = terrainRasterLayerOptions(useAppStore.getState().layers).find(
+        (option) => option.source === currentSource,
+      );
+      setTerrainUrl(!currentLayer && /^https?:\/\//i.test(currentSource) ? currentSource : "");
+      setRasterLayerId(currentLayer?.id ?? "");
       setSourceError(null);
       // A COG still opening from a previous session of this dialog would
       // otherwise leave the controls disabled and the button reading "Opening
       // COG…" with nothing in flight that the user can see. Its own finally
       // clears the flag again; a second request racing it is settled by the
       // controller, which reports the superseded one as not applied.
-      setSourceLoading(false);
+      setSourceLoading(null);
       setOpen(true);
     };
     // Close if the terrain control is removed (e.g. hidden from the Controls
@@ -150,7 +172,11 @@ export function TerrainSettingsDialog({ mapControllerRef }: TerrainSettingsDialo
   // Optional chaining on the ref would resolve to undefined and read as a
   // successful source change, leaving the dialog claiming a switch that never
   // happened. Surface the failure instead.
-  const applyTerrainSource = async (source: string | File | null, onApplied?: () => void) => {
+  const applyTerrainSource = async (
+    source: string | File | null,
+    action: TerrainSourceAction,
+    onApplied?: () => void,
+  ) => {
     const controller = mapControllerRef.current;
     if (!controller) {
       setSourceError(t("terrainSettings.sourceError"));
@@ -161,7 +187,7 @@ export function TerrainSettingsDialog({ mapControllerRef }: TerrainSettingsDialo
     // still running. Only the newest touches that state.
     const request = ++sourceRequestRef.current;
     const isCurrent = () => sourceRequestRef.current === request;
-    setSourceLoading(true);
+    setSourceLoading(action);
     setSourceError(null);
     try {
       // False means another caller's newer selection won, so this request must
@@ -170,18 +196,42 @@ export function TerrainSettingsDialog({ mapControllerRef }: TerrainSettingsDialo
     } catch (error) {
       if (isCurrent()) setSourceError(translateSourceError(error));
     } finally {
-      if (isCurrent()) setSourceLoading(false);
+      if (isCurrent()) setSourceLoading(null);
     }
   };
 
-  const applyCogSource = () => applyTerrainSource(terrainUrl);
+  const applyCogSource = () =>
+    applyTerrainSource(terrainUrl, "url", () => {
+      setRasterLayerId("");
+    });
 
   // Keep the URL input empty: a local filename is not a fetchable URL, and
   // leaving it in this field would let a later "Use COG DEM" click try to open
   // it as an HTTP source.
-  const applyLocalCogSource = (file: File) => applyTerrainSource(file, () => setTerrainUrl(""));
+  const applyLocalCogSource = (file: File) =>
+    applyTerrainSource(file, "file", () => {
+      setTerrainUrl("");
+      setRasterLayerId("");
+    });
 
-  const restoreDefaultSource = () => applyTerrainSource(null, () => setTerrainUrl(""));
+  const selectedRasterLayer = rasterLayerOptions.find((option) => option.id === rasterLayerId);
+  useEffect(() => {
+    // Gated on `open`: while closed, `layers` is empty by design (see
+    // useLayersWhen), which is not the selected layer disappearing.
+    if (open && rasterLayerId && !selectedRasterLayer) setRasterLayerId("");
+  }, [open, rasterLayerId, selectedRasterLayer]);
+
+  const applyRasterLayerSource = () => {
+    if (selectedRasterLayer) {
+      void applyTerrainSource(selectedRasterLayer.source, "layer", () => setTerrainUrl(""));
+    }
+  };
+
+  const restoreDefaultSource = () =>
+    applyTerrainSource(null, "default", () => {
+      setTerrainUrl("");
+      setRasterLayerId("");
+    });
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -220,66 +270,119 @@ export function TerrainSettingsDialog({ mapControllerRef }: TerrainSettingsDialo
             />
           </div>
           <div className="space-y-2 border-t pt-4">
-            <Label htmlFor="terrain-cog-url">{t("terrainSettings.sourceLabel")}</Label>
-            <p className="text-muted-foreground text-sm">
-              {t("terrainSettings.sourceDescription")}
-            </p>
-            <Input
-              id="terrain-cog-url"
-              type="url"
-              inputMode="url"
-              placeholder={t("terrainSettings.sourcePlaceholder")}
-              value={terrainUrl}
-              disabled={sourceLoading || !mapControllerRef.current}
-              onChange={(event) => setTerrainUrl(event.target.value)}
-              onKeyDown={(event) => {
-                // Gated like the button: a second Enter before React repaints
-                // would otherwise start an overlapping request.
-                if (event.key === "Enter" && !sourceLoading && terrainUrl.trim()) {
-                  void applyCogSource();
-                }
-              }}
-            />
-            <div className="space-y-1">
-              <Label htmlFor="terrain-cog-file">{t("terrainSettings.localSourceLabel")}</Label>
-              <Input
-                id="terrain-cog-file"
-                type="file"
-                accept=".tif,.tiff,image/tiff"
-                disabled={sourceLoading || !mapControllerRef.current}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void applyLocalCogSource(file);
-                  event.currentTarget.value = "";
-                }}
-              />
-              <p className="text-muted-foreground text-xs">
-                {t("terrainSettings.localSourceDescription")}
-              </p>
-            </div>
-            {sourceError ? (
-              <p className="text-destructive text-sm" role="alert">
-                {sourceError}
-              </p>
-            ) : null}
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={sourceLoading || !terrainUrl.trim() || !mapControllerRef.current}
-                onClick={() => void applyCogSource()}
-              >
-                {sourceLoading ? t("terrainSettings.sourceLoading") : t("terrainSettings.useCog")}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={sourceLoading || !mapControllerRef.current?.hasCustomTerrainSource()}
-                onClick={() => void restoreDefaultSource()}
-              >
-                {t("terrainSettings.restoreDefaultSource")}
-              </Button>
-            </div>
+            {!terrainSourceSupported && (
+              <>
+                <p className="text-sm font-medium">{t("terrainSettings.sourceLabel")}</p>
+                <p className="text-muted-foreground text-sm">
+                  {t("terrainSettings.sourceUnsupported")}
+                </p>
+              </>
+            )}
+            {terrainSourceSupported && (
+              <>
+                <Label htmlFor="terrain-cog-url">{t("terrainSettings.sourceLabel")}</Label>
+                <p className="text-muted-foreground text-sm">
+                  {t("terrainSettings.sourceDescription")}
+                </p>
+                <div className="space-y-1">
+                  <Label htmlFor="terrain-raster-layer">
+                    {t("terrainSettings.rasterLayerLabel")}
+                  </Label>
+                  <Select
+                    id="terrain-raster-layer"
+                    value={rasterLayerId}
+                    disabled={
+                      !!sourceLoading ||
+                      !mapControllerRef.current ||
+                      rasterLayerOptions.length === 0
+                    }
+                    onChange={(event) => setRasterLayerId(event.target.value)}
+                  >
+                    <option value="">{t("terrainSettings.rasterLayerPlaceholder")}</option>
+                    {rasterLayerOptions.map((layer) => (
+                      <option key={layer.id} value={layer.id}>
+                        {layer.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <p className="text-muted-foreground text-xs">
+                    {rasterLayerOptions.length > 0
+                      ? t("terrainSettings.rasterLayerDescription")
+                      : t("terrainSettings.noRasterLayers")}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!!sourceLoading || !selectedRasterLayer || !mapControllerRef.current}
+                    onClick={applyRasterLayerSource}
+                  >
+                    {sourceLoading === "layer"
+                      ? t("terrainSettings.sourceLoading")
+                      : t("terrainSettings.useRasterLayer")}
+                  </Button>
+                </div>
+                <Input
+                  id="terrain-cog-url"
+                  type="url"
+                  inputMode="url"
+                  placeholder={t("terrainSettings.sourcePlaceholder")}
+                  value={terrainUrl}
+                  disabled={!!sourceLoading || !mapControllerRef.current}
+                  onChange={(event) => setTerrainUrl(event.target.value)}
+                  onKeyDown={(event) => {
+                    // Gated like the button: a second Enter before React repaints
+                    // would otherwise start an overlapping request.
+                    if (event.key === "Enter" && !sourceLoading && terrainUrl.trim()) {
+                      void applyCogSource();
+                    }
+                  }}
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="terrain-cog-file">{t("terrainSettings.localSourceLabel")}</Label>
+                  <Input
+                    id="terrain-cog-file"
+                    type="file"
+                    accept=".tif,.tiff,image/tiff"
+                    disabled={!!sourceLoading || !mapControllerRef.current}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void applyLocalCogSource(file);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    {t("terrainSettings.localSourceDescription")}
+                  </p>
+                </div>
+                {sourceError ? (
+                  <p className="text-destructive text-sm" role="alert">
+                    {sourceError}
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!!sourceLoading || !terrainUrl.trim() || !mapControllerRef.current}
+                    onClick={() => void applyCogSource()}
+                  >
+                    {sourceLoading === "url"
+                      ? t("terrainSettings.sourceLoading")
+                      : t("terrainSettings.useCog")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={
+                      !!sourceLoading || !mapControllerRef.current?.hasCustomTerrainSource()
+                    }
+                    onClick={() => void restoreDefaultSource()}
+                  >
+                    {t("terrainSettings.restoreDefaultSource")}
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
           <div className="flex justify-between gap-2">
             <Button

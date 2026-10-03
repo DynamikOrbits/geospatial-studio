@@ -13,12 +13,15 @@ export * from "./routing";
 export * from "./polyline";
 export * from "./vector-color";
 export * from "./expressions";
+export * from "./document-locale";
+export * from "./label-number-format";
 export * from "./external-native-paint";
 export * from "./attribute-form";
 export * from "./popup";
 export * from "./joins";
 export * from "./virtual-fields";
 export * from "./quick-filters";
+export * from "./layer-filters";
 export * from "./capabilities";
 export * from "./deployment-capabilities";
 export * from "./selection";
@@ -35,6 +38,12 @@ export * from "./layer-groups";
 export * from "./pixel-format";
 export * from "./print-layout-config";
 export { createSampleStoryMap } from "./storymap-sample";
+export {
+  applyStoryLayerOpacity,
+  isStoryHiddenLayer,
+  storyLayerOpacityFactor,
+  storyVisibleLayers,
+} from "./storymap-playback";
 export {
   scrubWidgetsForRemovedLayers,
   scrubCommentsForRemovedLayers,
@@ -67,6 +76,18 @@ export {
   type StatisticsToolKind,
   type VectorToolKind,
 } from "./store";
+export {
+  NO_LAYERS,
+  selectLayerById,
+  selectLayerIds,
+  selectLayerSummaries,
+  selectLayersWhen,
+  useLayer,
+  useLayerIds,
+  useLayerSummaries,
+  useLayersWhen,
+  type LayerSummary,
+} from "./layer-selectors";
 export {
   getHistoryCoalesceMs,
   setHistoryCoalesceMs,
@@ -121,6 +142,7 @@ export {
   type ReverseGeocodeDisplay,
 } from "./geocoding";
 export {
+  getArcgisApiKey,
   getBuildEnvironment,
   getCesiumIonToken,
   getGoogleMapsApiKey,
@@ -131,6 +153,35 @@ export {
   getSpatialExtensionPath,
 } from "./runtime-env";
 export { isIpadDesktopUserAgent } from "./platform";
+export {
+  CESIUM_ION_QUICK_PICKS,
+  CESIUM_ION_SOURCE_KIND,
+  CESIUM_OSM_BUILDINGS_ASSET_ID,
+  CESIUM_BING_AERIAL_ASSET_ID,
+  CESIUM_GOOGLE_PHOTOREALISTIC_ASSET_ID,
+  cesiumIonAssetId,
+  cesiumIonAssetKind,
+  createCesiumIonLayer,
+  isCesiumIonLayer,
+  isCesiumOnlyLayer,
+  parseCesiumIonAssetId,
+  type CesiumIonAssetKind,
+  type CesiumIonQuickPick,
+  type CesiumIonQuickPickGroup,
+  type CesiumIonLayerOptions,
+} from "./cesium-ion";
+export {
+  CZML_QUICK_PICKS,
+  CZML_SOURCE_KIND,
+  createCzmlLayer,
+  czmlSource,
+  isCzmlLayer,
+  parseCzml,
+  type CzmlDocument,
+  type CzmlLayerOptions,
+  type CzmlPacket,
+  type CzmlSource,
+} from "./czml";
 export {
   GOOGLE_MAPS_API_KEY_HEADER,
   googleMapsApiKeyHeaderValue,
@@ -157,3 +208,11 @@ export {
   readStoredAuthorName,
   setStoredAuthorName,
 } from "./editor-identity";
+export {
+  CESIUM_KML_SOURCE_KIND,
+  isCesiumKmlLayer,
+  cesiumKmlSource,
+  createCesiumKmlLayer,
+  type CesiumKmlLayerOptions,
+} from "./cesium-kml";
+export { localFileName, uniqueImportedLayerName } from "./file-name";

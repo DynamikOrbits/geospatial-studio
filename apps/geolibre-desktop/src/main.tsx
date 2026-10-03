@@ -66,7 +66,7 @@ import "./lib/auth-return-url-boot";
 import i18n, { AVAILABLE_LANGUAGES, i18nReady, setActiveLanguage } from "./i18n";
 import { startAnalytics } from "./lib/analytics";
 import { installDiagnosticsCapture } from "./lib/diagnostics";
-import { isWindows } from "./lib/is-mobile";
+import { isDesktopRuntime, isWindows } from "./lib/is-mobile";
 import { isTauri } from "./lib/is-tauri";
 import { installStaleChunkReload } from "./lib/stale-chunk-reload";
 import { resolveAuthGate, type AuthGateConfig } from "./lib/auth-gate";
@@ -86,6 +86,10 @@ import { parseDeploymentCapabilities, useAppStore } from "@geolibre/core";
 import { readDeploymentEnvValue } from "./lib/deployment-env";
 import { initializeNativeProjectOpen } from "./lib/native-project-open";
 
+import { initializeNativeCoordinateOpen } from "./lib/native-coordinate-open";
+import { initializeNativeShareAuth } from "./lib/native-share-auth";
+import { configureShareOAuthReadiness, markColdShareCallback } from "./lib/share-oauth";
+
 installDiagnosticsCapture();
 if (window.parent !== window) {
   const workspaceOrigin = resolveDynamikWorkspaceOrigin(
@@ -94,14 +98,23 @@ if (window.parent !== window) {
   );
   if (workspaceOrigin) installDynamikWorkspaceAppBridge({ workspaceOrigin });
 }
+
+const nativeShareAuthReady = isDesktopRuntime()
+  ? initializeNativeShareAuth(markColdShareCallback)
+  : Promise.resolve();
+const nativeCoordinateOpenReady = initializeNativeCoordinateOpen();
 const nativeProjectOpenReady = initializeNativeProjectOpen();
+let nativeShareFetchReady: Promise<void> = Promise.resolve();
+let nativeArcGISFetchReady: Promise<void> = Promise.resolve();
 let nativeSidecarFetchReady: Promise<void> = Promise.resolve();
-// In the desktop build, route geocoding (place search / reverse geocode)
-// through Tauri's native HTTP client so it bypasses WebView CORS: public
-// Nominatim's CDN intermittently omits the CORS header on cached responses,
-// which the WebView rejects as "Search failed. Try again." Lazy + desktop-only
-// so the web/embedded bundles never import the Tauri HTTP plugin.
+// Install desktop-only transports before requests can be issued. ArcGIS uses
+// a dedicated guarded Rust command; the other adapters use scoped HTTP hosts.
 if (isTauri()) {
+  nativeArcGISFetchReady = import("./lib/arcgis-fetch")
+    .then(({ installNativeArcGISFetch }) => installNativeArcGISFetch())
+    .catch((error: unknown) => {
+      console.error("[GeoLibre] Failed to install native ArcGIS fetch", error);
+    });
   // WebView2 can apply browser CORS and Local Network Access restrictions to
   // the loopback processing server. Route those requests through Tauri's
   // scoped native client so Windows uses the same reliable path as the shell
@@ -124,18 +137,12 @@ if (isTauri()) {
       // silent unhandled rejection.
       console.error("[GeoLibre] Failed to install native geocoding fetch", error);
     });
-  // Likewise route share.geolibre.app (project Share + gallery) through the
-  // native HTTP client: the share server's CORS policy allows the web origin but
-  // not the Tauri WebView origin, so a browser fetch fails as "Could not reach
-  // share.geolibre.app." Lazy + desktop-only so web/embedded never import the
-  // Tauri HTTP plugin.
-  void import("./lib/share-fetch")
-    .then(({ installNativeShareFetch }) => installNativeShareFetch())
-    .catch((error: unknown) => {
-      // On failure the share client stays on the browser fetch (the CORS-blocked
-      // path this fixes); surface it rather than swallow the rejection.
-      console.error("[GeoLibre] Failed to install native share fetch", error);
-    });
+  // Built-in share host only: await the narrow native HTTP adapter before
+  // either OAuth sign-in or token requests. Self-hosted origins retain browser
+  // fetch and must explicitly allow this Tauri origin in their CORS policy.
+  nativeShareFetchReady = import("./lib/share-fetch").then(({ installNativeShareFetch }) =>
+    installNativeShareFetch(),
+  );
   // GeoLens sends X-Api-Key, which preflights in a WebView. Keep the built-in
   // datasets.geolibre.app connection working even when its CORS origin
   // allowlist does not include the packaged desktop origin.
@@ -144,6 +151,15 @@ if (isTauri()) {
     .catch((error: unknown) => {
       console.error("[GeoLibre] Failed to install native GeoLens fetch", error);
     });
+}
+if (isDesktopRuntime()) {
+  configureShareOAuthReadiness(
+    Promise.all([nativeShareAuthReady, nativeShareFetchReady]).then(() => undefined),
+  );
+} else {
+  void nativeShareFetchReady.catch(() => {
+    console.error("[GeoLibre] Failed to install native share transport");
+  });
 }
 // Recover from chunks orphaned by a web redeploy (stale lazy import → 404). A
 // no-op in the desktop build, whose chunks are bundled locally.
@@ -298,9 +314,12 @@ void Promise.all([
   // Sidecar-dependent panels can issue a request as soon as App mounts. On
   // Windows, wait until those requests have the native transport installed.
   nativeSidecarFetchReady,
+  // Restored ArcGIS layers can query immediately when App mounts.
+  nativeArcGISFetchReady,
   // Capture a file-association or command-line project path before App decides
   // whether to restore a configured startup project or the default workspace.
   nativeProjectOpenReady,
+  nativeCoordinateOpenReady,
   // Gate the first render on i18next being initialized with the active locale's
   // (lazily loaded) catalog, so the UI never paints raw translation keys.
   startupLanguageReady,

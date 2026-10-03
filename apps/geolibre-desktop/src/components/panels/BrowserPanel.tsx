@@ -7,7 +7,7 @@ import {
   useAppStore,
   type GeoLibreLayer,
 } from "@geolibre/core";
-import type { MapController } from "@geolibre/map";
+import type { MapEngine } from "@geolibre/map";
 import { fetchPostgisStatus, listPostgisTables } from "@geolibre/processing";
 import { Input, ScrollArea } from "@geolibre/ui";
 import { Search } from "lucide-react";
@@ -47,7 +47,7 @@ const CONNECTION_ID_PREFIX = "connection:";
 const FOLDER_ID_PREFIX = "folder:";
 
 interface BrowserPanelProps {
-  mapControllerRef: RefObject<MapController | null>;
+  mapControllerRef: RefObject<MapEngine | null>;
   /**
    * Open a recent project by path (shared with the toolbar's instance).
    * Resolves to an error message to show inline, or null on success.
@@ -442,6 +442,15 @@ export function BrowserPanel({
         }
         return;
       }
+      if (entry.kind === "csw") {
+        openAddData("csw", {
+          url: typeof entry.fields.endpoint === "string" ? entry.fields.endpoint : undefined,
+          // The entry saves the search term alongside the endpoint, so restore
+          // it too rather than reopening on an empty keyword field.
+          keyword: typeof entry.fields.keyword === "string" ? entry.fields.keyword : undefined,
+        });
+        return;
+      }
       beginBusy(node.id);
       try {
         await applyServiceEntry(entry, { addLayer, mapControllerRef });
@@ -647,14 +656,9 @@ export function BrowserPanel({
   };
 
   // Toggle a node's presence in the Favorites section; the favorites change
-  // event refreshes the tree via useBrowserTree. The descriptor carries enough
-  // to rebuild + activate the favorited node without the live original.
-  //
-  // The label/payload are snapshotted at favorite time and not refreshed while
-  // the original still exists — intentional, matching the "rebuild without the
-  // live original" design. There's no rename for services/connections today, so
-  // this is currently unreachable; a future rename feature should re-sync (or
-  // accept) the stored label.
+  // event refreshes the tree via useBrowserTree. Snapshot only display metadata
+  // and stable identity; activating a service resolves its current definition
+  // from the library rather than persisting deployment configuration here.
   const toggleFavorite = (node: BrowserNode) => {
     if (favoriteIds.has(node.id)) {
       removeFavorite(node.id);
@@ -669,6 +673,7 @@ export function BrowserPanel({
       serviceId: node.serviceId,
       serviceKind: node.serviceKind,
       builtin: node.builtin,
+      deployment: node.deployment,
       path: node.path,
     });
   };

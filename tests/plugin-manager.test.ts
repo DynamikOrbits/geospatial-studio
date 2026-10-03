@@ -1305,3 +1305,271 @@ describe("PluginManager plugin coordination", () => {
     assert.equal(manager.isActive("dock"), false);
   });
 });
+
+describe("PluginManager renderer compatibility", () => {
+  it("rejects unsupported activation, state changes, and URL callbacks", async () => {
+    const manager = new PluginManager();
+    let calls = 0;
+    manager.register(
+      testPlugin({
+        activate: () => {
+          calls++;
+        },
+        applyProjectState: () => {
+          calls++;
+        },
+        urlParameterNames: ["dataset"],
+        handleUrlParameters: () => {
+          calls++;
+        },
+      }),
+    );
+    const globe = { getMapRenderer: () => "cesium" } as GeoLibreAppAPI;
+    assert.equal(manager.activate("url-loader", globe), false);
+    assert.equal(manager.applyPluginState("url-loader", globe, {}), false);
+    await manager.handleUrlParameters(new URLSearchParams("dataset=places"), globe);
+    assert.equal(calls, 0);
+  });
+
+  it("blocks late control registration after changing to an unsupported renderer", () => {
+    const manager = new PluginManager();
+    let renderer: "maplibre" | "cesium" = "maplibre";
+    let mounted = 0;
+    let scoped: GeoLibreAppAPI | undefined;
+    const api = {
+      getMapRenderer: () => renderer,
+      addMapControl: () => {
+        mounted++;
+        return true;
+      },
+    } as unknown as GeoLibreAppAPI;
+    manager.register(
+      testPlugin({
+        activate: (value) => {
+          scoped = value;
+        },
+      }),
+    );
+    manager.activate("url-loader", api);
+    renderer = "cesium";
+    assert.equal(scoped!.addMapControl({ onAdd: () => null as never, onRemove: () => {} }), false);
+    assert.equal(mounted, 0);
+  });
+
+  it("suspends unsupported plugins without losing their saved activation or settings", () => {
+    const manager = new PluginManager();
+    let renderer: "maplibre" | "cesium" = "maplibre";
+    let active = 0;
+    let stopped = 0;
+    let settings: unknown = { value: 1 };
+    manager.register(
+      testPlugin({
+        activate: () => {
+          active++;
+        },
+        deactivate: () => {
+          stopped++;
+        },
+        getProjectState: () => settings,
+        applyProjectState: (_app, value) => {
+          settings = value;
+        },
+      }),
+    );
+    const api = { getMapRenderer: () => renderer } as GeoLibreAppAPI;
+    const state = {
+      manifestUrls: [],
+      activePluginIds: ["url-loader"],
+      mapControlPositions: {},
+      settings: { "url-loader": { value: 42 } },
+    };
+    manager.restoreProjectState(state, api);
+    renderer = "cesium";
+    manager.restoreProjectState(state, api);
+    assert.equal(manager.isActive("url-loader"), false);
+    assert.equal(stopped, 1);
+    assert.deepEqual(manager.getProjectState(), state);
+    renderer = "maplibre";
+    manager.restoreProjectState(manager.getProjectState(), api);
+    assert.equal(manager.isActive("url-loader"), true);
+    assert.equal(active, 2);
+    assert.deepEqual(settings, { value: 42 });
+  });
+
+  it("remounts a compatible plugin once on renderer replacement", () => {
+    const manager = new PluginManager();
+    let renderer: "maplibre" | "cesium" = "maplibre";
+    let mounts = 0;
+    manager.register(
+      testPlugin({
+        engines: ["maplibre", "cesium"],
+        activate: () => {
+          mounts++;
+        },
+      }),
+    );
+    const api = { getMapRenderer: () => renderer } as GeoLibreAppAPI;
+    const state = {
+      manifestUrls: [],
+      activePluginIds: ["url-loader"],
+      mapControlPositions: {},
+      settings: {},
+    };
+    manager.restoreProjectState(state, api);
+    renderer = "cesium";
+    manager.restoreProjectState(state, api);
+    manager.restoreProjectState(state, api);
+    assert.equal(mounts, 2);
+  });
+  it("blocks UI registration from a retained state scope once the plugin deactivates", () => {
+    const manager = new PluginManager();
+    let scoped: GeoLibreAppAPI | undefined;
+    let registered = 0;
+    const api = {
+      getMapRenderer: () => "maplibre",
+      addMapControl: () => {
+        registered++;
+        return true;
+      },
+      registerToolbarMenu: () => {
+        registered++;
+        return () => undefined;
+      },
+      registerRightPanel: () => {
+        registered++;
+        return () => undefined;
+      },
+    } as unknown as GeoLibreAppAPI;
+    manager.register(
+      testPlugin({
+        applyProjectState: (value) => {
+          scoped = value;
+        },
+      }),
+    );
+    manager.activate("url-loader", api);
+    manager.applyPluginState("url-loader", api, {});
+    const control = { onAdd: () => null as never, onRemove: () => {} };
+    assert.equal(scoped!.addMapControl(control), true);
+    manager.deactivate("url-loader", api);
+    assert.equal(scoped!.addMapControl(control), false);
+    scoped!.registerToolbarMenu?.({ id: "stale", label: "Stale", items: [] });
+    scoped!.registerRightPanel?.({ id: "stale-panel", title: "Stale", render: () => undefined });
+    assert.equal(registered, 1);
+  });
+  it("rejects controls from an activation replaced by a renderer switch", () => {
+    const manager = new PluginManager();
+    let renderer: "maplibre" | "cesium" = "maplibre";
+    const scopes: GeoLibreAppAPI[] = [];
+    let mounted = 0;
+    manager.register(
+      testPlugin({
+        engines: ["maplibre", "cesium"],
+        activate: (api) => {
+          scopes.push(api);
+        },
+      }),
+    );
+    const api = {
+      getMapRenderer: () => renderer,
+      addMapControl: () => {
+        mounted++;
+        return true;
+      },
+    } as unknown as GeoLibreAppAPI;
+    const state = {
+      manifestUrls: [],
+      activePluginIds: ["url-loader"],
+      mapControlPositions: {},
+      settings: {},
+    };
+    manager.restoreProjectState(state, api);
+    renderer = "cesium";
+    manager.restoreProjectState(state, api);
+    const control = { onAdd: () => null as never, onRemove: () => {} };
+    assert.equal(scopes[0].addMapControl(control), false);
+    assert.equal(scopes[1].addMapControl(control), true);
+    assert.equal(mounted, 1);
+  });
+});
+
+describe("PluginManager getProjectState fallback", () => {
+  const restored = {
+    manifestUrls: [],
+    activePluginIds: [],
+    mapControlPositions: { broken: "top-left" as const },
+    settings: { broken: { step: 1 } },
+  };
+  const brokenPlugin = () =>
+    testPlugin({
+      id: "broken",
+      getProjectState: () => {
+        throw new Error("control is gone");
+      },
+    });
+
+  it("keeps a failing plugin's restored entry by default", () => {
+    const manager = new PluginManager();
+    manager.register(brokenPlugin());
+    manager.restoreProjectState(restored, app);
+
+    const state = manager.getProjectState();
+    assert.deepEqual(state.settings.broken, { step: 1 });
+    assert.equal(state.mapControlPositions.broken, "top-left");
+  });
+
+  it("takes a failing plugin's entry from a newer stored snapshot when given one", () => {
+    const manager = new PluginManager();
+    manager.register(brokenPlugin());
+    manager.restoreProjectState(restored, app);
+
+    const state = manager.getProjectState({
+      ...restored,
+      mapControlPositions: { broken: "bottom-right" },
+      settings: { broken: { step: 7 } },
+    });
+    assert.deepEqual(state.settings.broken, { step: 7 });
+    assert.equal(state.mapControlPositions.broken, "bottom-right");
+  });
+
+  it("keeps a live control position read before the state accessor threw", () => {
+    const manager = new PluginManager();
+    manager.register({ ...brokenPlugin(), getMapControlPosition: () => "top-right" });
+    manager.restoreProjectState(restored, app);
+
+    const state = manager.getProjectState();
+    assert.equal(state.mapControlPositions.broken, "top-right");
+    assert.deepEqual(state.settings.broken, { step: 1 });
+  });
+});
+
+describe("PluginManager restore onto a replaced map", () => {
+  it("reactivates active plugins when the map was replaced on the same renderer", () => {
+    const manager = new PluginManager();
+    const calls: string[] = [];
+    manager.register(
+      testPlugin({
+        id: "dock",
+        activate: () => {
+          calls.push("activate");
+        },
+        deactivate: () => {
+          calls.push("deactivate");
+        },
+      }),
+    );
+    const state = {
+      manifestUrls: [],
+      activePluginIds: ["dock"],
+      mapControlPositions: {},
+      settings: {},
+    };
+    manager.restoreProjectState(state, app);
+    manager.restoreProjectState(state, app);
+    assert.deepEqual(calls, ["activate"]);
+
+    manager.restoreProjectState(state, app, { mapReplaced: true });
+    assert.deepEqual(calls, ["activate", "deactivate", "activate"]);
+    assert.equal(manager.isActive("dock"), true);
+  });
+});

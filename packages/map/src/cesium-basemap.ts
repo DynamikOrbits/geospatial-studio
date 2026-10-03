@@ -1,4 +1,4 @@
-import type { CesiumBasemapImagery } from "@geolibre/core";
+import { CESIUM_BING_AERIAL_ASSET_ID, type CesiumBasemapImagery } from "@geolibre/core";
 import type { CesiumWidget, ImageryLayer, ImageryProvider } from "@cesium/engine";
 
 // Draws the project basemap on the Cesium globe. `@geolibre/core`'s
@@ -14,8 +14,39 @@ import type { CesiumWidget, ImageryLayer, ImageryProvider } from "@cesium/engine
 
 type CesiumNs = typeof import("@cesium/engine");
 
-/** Keyless imagery for a basemap with no raster form when no Ion token is set. */
+/**
+ * Keyless satellite imagery for a basemap with no raster form when no Ion token
+ * is set. Esri World Imagery needs no key and shows the Earth, where street
+ * tiles under a 3D globe mostly show an empty ocean; it is what the God's Eye
+ * View reference app defaults to without a key, for the same reason.
+ */
+const ESRI_WORLD_IMAGERY_URL =
+  "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer";
+
+/** Last resort when even Esri cannot be reached. */
 const KEYLESS_FALLBACK_URL = "https://tile.openstreetmap.org/";
+
+/**
+ * Keyless imagery to draw when the chosen basemap cannot be reached.
+ *
+ * Every provider handed to `ImageryLayer.fromProviderAsync` must end in a
+ * provider, never a rejection: Cesium's surface tile provider reports itself
+ * unready while any imagery layer in the stack is still without one, and an
+ * unready stack stops the globe drawing *any* tile — not just that basemap.
+ * A revoked, expired or URL-restricted Ion token would otherwise leave the
+ * viewer showing bare space. The OpenStreetMap provider constructs
+ * synchronously, so this promise cannot reject.
+ */
+function keylessImagery(Cesium: CesiumNs): Promise<ImageryProvider> {
+  return Cesium.ArcGisMapServerImageryProvider.fromUrl(ESRI_WORLD_IMAGERY_URL, {
+    enablePickFeatures: false,
+  }).catch(() => lastResortImagery(Cesium));
+}
+
+/** The end of every fallback chain: constructed, not fetched, so it cannot reject. */
+function lastResortImagery(Cesium: CesiumNs): ImageryProvider {
+  return new Cesium.OpenStreetMapImageryProvider({ url: KEYLESS_FALLBACK_URL });
+}
 
 /**
  * An imagery provider for one tile template. TMS row ordering is expressed by
@@ -26,10 +57,15 @@ const KEYLESS_FALLBACK_URL = "https://tile.openstreetmap.org/";
 function templateProvider(
   Cesium: CesiumNs,
   template: string,
-  options: { attribution?: string; maximumLevel?: number; scheme?: "tms" },
+  options: {
+    attribution?: string;
+    maximumLevel?: number;
+    scheme?: "tms";
+  },
 ): ImageryProvider {
+  const url = options.scheme === "tms" ? template.replace("{y}", "{reverseY}") : template;
   return new Cesium.UrlTemplateImageryProvider({
-    url: options.scheme === "tms" ? template.replace("{y}", "{reverseY}") : template,
+    url,
     maximumLevel: options.maximumLevel,
     // Cesium shows this in its own credit display, keeping the keyless raster
     // basemaps licence-clean the way the 2D map's attribution control does.
@@ -92,17 +128,57 @@ export function applyBasemapImagery(
   // ellipsoid bare, as the 2D panes leave their canvas empty.
   if (imagery.kind === "none") return [];
 
+  if (imagery.kind === "arcgis") {
+    // Public ArcGIS services supply their own attribution and tile-level limits.
+    // Avoid Cesium's bundled evaluation token for the authenticated basemap API.
+    const layer = Cesium.ImageryLayer.fromProviderAsync(
+      Cesium.ArcGisMapServerImageryProvider.fromUrl(imagery.url, {
+        enablePickFeatures: false,
+      }).catch(() =>
+        // World Imagery *is* the keyless fallback, and it is the default
+        // without an Ion token, so retrying it here would only double the wait
+        // before the globe draws anything on the most common failing path.
+        imagery.url === ESRI_WORLD_IMAGERY_URL ? lastResortImagery(Cesium) : keylessImagery(Cesium),
+      ),
+    );
+    viewer.imageryLayers.add(layer, 0);
+    return [layer];
+  }
+
+  if (imagery.kind === "ion" || imagery.kind === "natural-earth") {
+    const provider =
+      imagery.kind === "ion"
+        ? Cesium.IonImageryProvider.fromAssetId(imagery.assetId, { accessToken: ionToken })
+        : Cesium.TileMapServiceImageryProvider.fromUrl(
+            Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII"),
+          );
+    // An Ion asset the token cannot reach — revoked, expired, or restricted to
+    // other origins than this deployment's — degrades to keyless imagery
+    // rather than taking the whole globe down with it.
+    const layer = Cesium.ImageryLayer.fromProviderAsync(
+      provider.catch(() => keylessImagery(Cesium)),
+    );
+    viewer.imageryLayers.add(layer, 0);
+    return [layer];
+  }
+
   if (imagery.kind === "default") {
     // No raster equivalent for this basemap (a provider style, a custom URL).
-    // Ion World Imagery when a token is configured — the globe's historical
-    // default, kept so a project that relies on it is unchanged — and keyless
-    // OpenStreetMap otherwise.
-    const layer = ionToken
-      ? Cesium.ImageryLayer.fromWorldImagery({})
-      : Cesium.ImageryLayer.fromProviderAsync(
-          Promise.resolve(new Cesium.OpenStreetMapImageryProvider({ url: KEYLESS_FALLBACK_URL })),
-          {},
-        );
+    // Bing Maps Aerial through Ion when a token is configured, and keyless Esri
+    // World Imagery otherwise. Use the named asset instead of Cesium's implicit
+    // World Imagery default so an upstream default change cannot change ours.
+    // A service that cannot be reached would otherwise leave the globe bare, so
+    // each option falls through to the next: Ion imagery, then keyless Esri,
+    // then street tiles. An expired or revoked token degrades to a drawn globe
+    // rather than an empty one.
+    const layer = Cesium.ImageryLayer.fromProviderAsync(
+      ionToken
+        ? Cesium.IonImageryProvider.fromAssetId(CESIUM_BING_AERIAL_ASSET_ID, {
+            accessToken: ionToken,
+          }).catch(() => keylessImagery(Cesium))
+        : keylessImagery(Cesium),
+      {},
+    );
     viewer.imageryLayers.add(layer, 0);
     return [layer];
   }

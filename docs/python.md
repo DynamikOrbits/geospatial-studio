@@ -41,6 +41,13 @@ use `[vector]` to keep an existing vector-only environment as light as before.
 The optional `[all]` extra is pip-only. If you installed via conda, add it with
 `pip install "geolibre[all]"` inside the same environment.
 
+To embed the map in a [Dash](https://dash.plotly.com/) app, install the `dash`
+extra and use `from geolibre import DashMap`:
+
+```bash
+pip install "geolibre[dash]"
+```
+
 ## Quickstart
 
 ```python
@@ -272,11 +279,11 @@ m.on_layer_change(lambda e: print("layers", e["layerIds"]))
 | `add_geojson(data, name=, **style)` | Add GeoJSON from a dict, file path, URL, JSON string, or GeoDataFrame. |
 | `add_gdf(gdf, name=, column=None, **style)` | Add a GeoDataFrame, optionally as a choropleth. |
 | `add_csv(data, x="longitude", y="latitude", name=, **style)` / `add_xy_data(...)` | Add points from a CSV path, URL, text, DataFrame, or row mappings. |
-| `add_marker(lng, lat, name=, properties=, **style)` | Add a single point marker (shown as a circle; `properties` appear on click). |
-| `add_markers(points, name=, **style)` | Add point markers from `(lng, lat)` pairs, `{lng/lon/x, lat/y, …}` dicts, GeoJSON, or a GeoDataFrame. |
+| `add_marker(lng, lat, name=, properties=, color=, opacity=, radius=, stroke_color=, stroke_width=, shape=, size=, icon=, **style)` | Add a single point marker (`properties` appear on click). |
+| `add_markers(points, name=, color=, opacity=, radius=, stroke_color=, stroke_width=, shape=, size=, icon=, **style)` | Add point markers from `(lng, lat)` pairs, `{lng/lon/x, lat/y, …}` dicts, GeoJSON, or a GeoDataFrame. |
 | `add_circle_markers(points, name=, radius=, **style)` | Add circle markers with an explicit `radius`. |
 | `add_marker_cluster(points, name=, cluster_radius=, cluster_max_zoom=, **style)` | Add clustered point markers. |
-| `add_heatmap(points, name=, radius=, intensity=, **style)` | Add point data using the density heatmap renderer. |
+| `add_heatmap(points, name=, radius=, intensity=, color_ramp=, weight_field=, **style)` | Add point data using the density heatmap renderer, optionally weighted by a numeric field. |
 | `add_choropleth(data, column, name=, class_count=, colormap=, scheme=, **style)` | Add a GeoJSON layer with graduated symbology computed from a numeric `column`. |
 | `add_data(data, column=None, name=, **kwargs)` | Add data; a choropleth when `column` is given, else a plain GeoJSON layer (leafmap parity). |
 | `add_vector(data, name=, render_mode=, data_format=, source_layer=, **style)` | Add a vector dataset from a URL (GeoParquet, FlatGeobuf, zipped Shapefile, GeoJSON, …) or a local file (read via GeoPandas and inlined). |
@@ -289,12 +296,15 @@ m.on_layer_change(lambda e: print("layers", e["layerIds"]))
 | `add_pmtiles(url, name=, tile_type=, source_layers=, **style)` | Add a PMTiles archive (vector or raster). |
 | `add_tile_layer(url, name=, tile_size=, attribution=)` | Add a raster XYZ tile layer. |
 | `add_ee_layer(ee_object, vis_params=, name=, shown=, opacity=)` | Add an authenticated Google Earth Engine object as raster tiles (needs `earthengine-api`). |
-| `add_wms(endpoint, layers, name=, styles=, image_format=, transparent=, tile_size=, **style)` | Add a WMS layer (GetMap, tiled raster). |
-| `add_wmts(url, name=, tile_size=, **style)` | Add a WMTS layer from a tile URL template. |
+| `add_wms(endpoint, layers, name=, styles=, image_format=, transparent=, tile_size=, version=, crs=, bounds=, **style)` | Add a WMS layer (GetMap, tiled raster). `bounds` is `[west, south, east, north]`, needed for zoom-to-layer. `crs` defaults to `EPSG:3857`; for a server without Web Mercator pass a geographic CRS it lists (`EPSG:4326`, `EPSG:4258`, `EPSG:6706`, or `CRS:84` with `version="1.3.0"`; no others). Only the desktop app redraws those tiles into Web Mercator: the web build and `export_html` pages still send the Web Mercator BBOX, so such a layer stays blank there. |
+| `add_wmts(url, name=, tile_size=, bounds=, **style)` | Add a WMTS layer from a tile URL template. |
 | `add_wfs(endpoint, type_name, name=, version=, output_format=, srs_name=, max_features=, **style)` | Add a WFS layer (GetFeature GeoJSON, fetched and inlined). |
 | `add_cog(url, name=, bands=, colormap=, rescale=, **style)` | Add a Cloud Optimized GeoTIFF (URL or a kernel-side local GeoTIFF path). |
 | `add_raster(source, name=, bands=, colormap=, rescale=, array_args=, **style)` | Add a COG/GeoTIFF URL or path, or an xarray DataArray/Dataset (xarray needs `geolibre[raster]`). |
-| `add_3d_tiles(url, name=, altitude_offset=, request_headers=, **style)` | Add a 3D Tiles `tileset.json`. |
+| `add_3d_tiles(url=None, name=, ion_asset_id=, altitude_offset=, request_headers=, **style)` | Add a 3D Tiles `tileset.json` URL, or a Cesium Ion tileset by asset id (3D globe only). |
+| `add_cesium_ion(asset_id, name=, kind="3d-tiles", altitude_offset=, **style)` | Add a Cesium Ion asset by id: a 3D Tiles tileset or (`kind="imagery"`) an imagery layer. Renders on the 3D globe, with the app's Ion token. |
+| `add_czml(url=None, name=, data=, source_path=, **style)` | Add a CZML (Cesium Language) dynamic 3D scene by URL or inline packets: orbits, vehicle tracks, moving models. Renders on the 3D globe, which follows the document's clock. |
+| `add_cesium_kml(url=None, name=, data=, source_path=, **style)` | Native KML/KMZ on the globe with document styles and overlays. Supply a URL, inline XML, or a KMZ data URL; use `add_kml` for vector conversion. |
 | `add_video(urls, coordinates, name=, **style)` | Add a georeferenced video (four `[lng, lat]` corners). |
 | `add_basemap(basemap)` | Set the background basemap. |
 | `split_map(left_layers=None, right_layers=None, orientation=, position=, control_position=)` | Add a swipe (split-map) comparison slider between two layer sets. |
@@ -308,12 +318,185 @@ m.on_layer_change(lambda e: print("layers", e["layerIds"]))
 | `rename_layer(layer, name)` / `move_layer(layer, index)` / `duplicate_layer(layer, name=)` / `show_layer(layer)` / `hide_layer(layer)` | Manage layers by id, name, or `Layer` handle. |
 | `layer_properties(layer)` / `column_values(layer, column)` / `describe()` | Inspect inlined data and summarize a project without a browser round trip. |
 | `remove_layer(layer_id)` / `clear_layers()` | Remove one layer by id, name, or handle, or remove all layers. |
+| `set_popup(layer, fields=None, click=, hover=, title=, title_expression=, body_expression=, show_feature_id=, tooltip=, merge=False)` | Choose what a click popup shows for a layer, and how each value is formatted. |
+| `set_tooltip(layer, fields=True)` / `clear_popup(layer)` | Turn a hover tooltip on (or off), or drop the popup config and restore the default popup. |
+| `set_identify(layer="all")` | Arm the Identify tool so a click opens the popup: on one layer (id, name, or handle), on every visible layer (`"all"`), or off (`None`). |
+| `show_control(name, visible=True)` / `hide_control(name)` | Show or hide a toolbar panel (`bookmark`, `search`, `measure`, `minimap`, `print`) or a built-in map control (`navigation`, `fullscreen`, `compass`, `geolocate`, `globe`, `scale`, `attribution`, `logo`). |
+| `set_projection(projection)` / `projection` | Draw the map as a `"globe"` (the default) or flat `"mercator"` map; saved in the project. |
 | `to_project(keep_credentials=False)` | Return the current project as a dict, credentials redacted unless `keep_credentials=True`. |
 | `load_project(src)` | Replace the project from a dict, JSON string, or `.geolibre.json` path. |
 | `save_project(path, keep_credentials=False)` | Write the current project to a `.geolibre.json` file, credentials redacted unless `keep_credentials=True`. |
 
 Style keyword arguments (for example `fillColor`, `strokeColor`, `strokeWidth`,
 `circleRadius`) map to the GeoLibre [layer style fields](project-format.md).
+
+### Marker symbology
+
+`add_marker` and `add_markers` take the common point-symbology settings as named
+arguments, so you do not have to know the underlying style keys:
+
+```python
+m.add_markers(points, color="#e11d48", radius=8, stroke_color="#ffffff", stroke_width=2)
+m.add_markers(points, shape="pin", color="#e11d48", size=32)
+m.add_markers(points, icon='<svg viewBox="0 0 24 24">…</svg>', size=28)
+```
+
+A point layer draws two ways. By default it is a MapLibre circle sized by
+`radius`. Passing `shape`, `size`, or `icon` switches it to a **marker sprite**:
+one of `circle`, `square`, `triangle`, `diamond`, `star`, `cross`, `pin`, or
+`custom` (which needs `icon`, raw SVG markup or a data URL).
+
+The two modes take different settings, and mixing them is an error rather than a
+silent no-op. A sprite layer replaces the circle layer outright and draws its own
+white halo, so `opacity`, `radius`, `stroke_color`, and `stroke_width` are
+circle-only and are rejected when `shape`/`size`/`icon` is also given — use
+`size` for a sprite's size. A sprite's `color` must be a hex color, because the
+sprite baker accepts nothing else and would otherwise fall back to the default
+blue in silence.
+
+Where a named argument and its underlying style key are both passed
+(`add_markers(pts, radius=8, circleRadius=20)`), the raw style key wins — it is
+the low-level escape hatch.
+
+### Popups and tooltips
+
+Without any configuration, clicking a feature while Identify is armed shows
+the layer name and every visible property, and there is no hover tooltip. Every `add_*` method that
+takes style overrides accepts `popup=` and `tooltip=` to change that (the
+exception is `add_ee_layer`, which has a fixed signature), and `set_popup` /
+`set_tooltip` / `clear_popup` change it on a layer that already exists.
+
+```python
+m.add_markers(
+    points,
+    popup={
+        "title": "name",                 # heading, instead of the layer name
+        "fields": [
+            {"field": "name", "label": "Site"},
+            {"field": "photo", "kind": "image", "label": "Photo"},
+            {"field": "url", "kind": "link", "link_label": "Read more"},
+            {"field": "pop", "kind": "number", "thousands": True, "suffix": " people"},
+            {"field": "surveyed", "kind": "date", "date_format": "datetime"},
+        ],
+    },
+    tooltip="name",
+)
+
+m.set_popup("Sites", ["name", "pop"], title="name")   # replace the config
+m.set_tooltip("Sites", ["name"])                       # add a hover tip
+m.set_popup("Sites", click=False)                      # no popup on click
+m.clear_popup("Sites")                                 # back to the default
+```
+
+Popups open only while the Identify tool is armed, which in the app is the
+Identify button on a layer or the "Identify visible layers" button in the Layers
+panel header. `set_identify` arms it from Python, and can run before the map is
+displayed. Identify covers one layer or every visible layer at a time, and hover
+tooltips pause while it is armed:
+
+```python
+m.set_identify()                 # every visible layer
+m.set_identify("Sites")          # one layer
+m.set_identify(None)             # off
+
+m.show_control("bookmark")       # open the Bookmarks panel
+m.show_control("search")         # open the place search box
+m.hide_control("globe")          # hide the globe/flat toggle button
+m.set_projection("mercator")     # draw a flat map instead of a globe
+```
+
+Identify and the controls are not saved in the project. `set_projection` is.
+
+`popup=` also accepts shorter forms: a single property name (`popup="name"`), a
+list of names (`popup=["name", "pop"]`), a list of field mappings, or `False` to
+suppress the click popup. The full mapping form above takes the same keys as
+`set_popup` — `fields`, `click`, `hover`, `title`, `title_expression`,
+`body_expression`, `show_feature_id`, `max_width`, `image_height`, `tooltip` —
+and rejects a key it does not know, so a misspelling is an error rather than a
+setting that quietly does nothing. Those keys belong *inside* `popup=`; passed
+to `add_markers` directly they would be taken for style keys. The two sizes are
+the exception: `popup_max_width=` and `popup_image_height=` work as top-level
+arguments on every `add_*` method too, for when a wider popup is the only
+change you want. `tooltip=` takes a property name, a list of names, `True` to
+put every configured popup field in the tip, or `False` to turn it off.
+
+A field's `kind` decides how the value renders:
+
+| `kind` | Renders as |
+| --- | --- |
+| `auto` (default) | Text, except an inline base64 raster data URL, which becomes a thumbnail. |
+| `text` | Text, with `prefix`/`suffix` applied. |
+| `number` | A localized number; `decimals`, `thousands`, `prefix`, `suffix`. |
+| `date` | A localized date; `date_format` is `date`, `datetime`, `time`, `iso`, or `year`. |
+| `link` | An `http(s)` value becomes a link, labelled `link_label`. |
+| `image` | An `http(s)` value or inline base64 raster data URL becomes a thumbnail. |
+
+### Sizing the popup and its pictures
+
+The popup is 520 px wide by default (420 px when it carries a picture, which it
+lets you drag wider), and a picture inside it draws at most `min(50vh, 420px)`
+tall. `max_width` and `image_height` change both, in CSS pixels:
+
+```python
+m.add_markers(
+    sites,
+    shape="pin", color="#e11d48", size=32,
+    popup={
+        "title": "name",
+        "max_width": 640,       # 288–1200; the viewport still caps it
+        "image_height": 420,    # 40–1200
+        "fields": [
+            {"field": "photo", "kind": "image", "label": "Photo"},
+            {"field": "url", "kind": "link", "link_label": "Read more"},
+        ],
+    },
+    tooltip="name",
+)
+
+# The same two settings as top-level arguments, on any add_* method:
+m.add_markers(sites, popup=["name", "photo"], popup_max_width=640, popup_image_height=420)
+
+# Or on a layer that already exists (merge=True keeps the fields):
+m.set_popup("Sites", max_width=640, image_height=420, merge=True)
+```
+
+A thumbnail keeps its aspect ratio, so a landscape photo needs the **width** to
+grow before it can use the extra height — raise `max_width` alongside
+`image_height`. A size outside the range the app renders is an error rather
+than a value silently clamped on the map, and clicking a picture still opens it
+full-size in a lightbox whatever the popup's own size is.
+
+Two rules worth knowing before you port a popup from another library:
+
+- **Raw HTML in a property is not rendered as markup, and neither is Markdown.**
+  A popup value that arrives from a GeoJSON file is untrusted, so it is written
+  as text rather than parsed. Use `kind="image"` and `kind="link"` for pictures
+  and links, and
+  `body_expression` (a [MapLibre expression](https://maplibre.org/maplibre-style-spec/expressions/),
+  as JSON text) when you want a composed sentence instead of a table:
+  `body_expression='["concat", ["get", "name"], " — ", ["get", "county"], " County"]'`.
+  The one exception is a KML `description` property, whose known markup is
+  sanitized and rendered, so a converted KML keeps its description card.
+- **A tooltip needs fields flagged for hover, and flagging them narrows the
+  click popup.** The two share one field list: the tooltip shows the entries
+  flagged for hover, and the click popup shows *every* entry — but only falls
+  back to "all visible properties" while that list is empty. So
+
+  ```python
+  m.add_markers(points, tooltip="name")     # click popup now shows ONLY name
+  ```
+
+  because naming a tooltip field creates the list. To keep the full click popup,
+  list the fields you want on click as well, and flag one for hover:
+
+  ```python
+  m.add_markers(points, popup=["name", "pop", "county"], tooltip="name")
+  ```
+
+  A tooltip that could never show anything is an error rather than a tip that
+  silently never appears — including one whose only flagged field is an
+  `image`, since images are dropped from tooltips (their value is a URL, which
+  would become the whole tip). The click popup still shows the picture.
 
 ## Use in marimo
 
@@ -440,3 +623,21 @@ pip install -e python    # editable install for development
 
 Changes to the Python code are picked up on kernel restart. Changes to the app
 (TypeScript) require re-running `npm run build:embed` and restarting the kernel.
+
+## Rendering engines and mixed pane layouts
+
+```python
+m = Map(renderer="cesium", center=(-100, 40), zoom=4)
+m.set_map_layout(1, 2, view_kinds=["cesium", "maplibre"], sync_view=True)
+pane_id = m.project["secondaryMapViews"][0]["id"]
+m.set_renderer("cesium", pane_id=pane_id)
+assert m.get_renderer() == "cesium"
+```
+
+Renderer choices are `"maplibre"`, `"mapbox"`, `"cesium"`, and `"arcgis"`.
+Omitting `pane_id` targets the
+primary map. Grid dimensions are 1–4; `view_kinds` contains one renderer per
+pane, primary first. Existing pane IDs, cameras, and visibility overrides survive
+layout resizing. Save the project normally to preserve `primaryRenderer` and
+each secondary pane's `viewKind`. `DashMap(renderer="cesium")` selects the same
+initial renderer; Dash callbacks can update these fields through `project`.

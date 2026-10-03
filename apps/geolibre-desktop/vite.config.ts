@@ -3,7 +3,8 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createRequire } from "node:module";
 import path from "node:path";
-import type { RollupLog, RollupOptions, WarningHandlerWithDefault } from "rollup";
+import type { RollupLog, WarningHandlerWithDefault } from "rollup";
+import type { OutputChunk, RolldownOptions } from "rolldown";
 import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -11,9 +12,27 @@ import { bundledPlugins } from "./vite-plugins/bundled-plugins";
 import { copyCesiumAssets } from "./vite-plugins/copy-cesium-assets";
 import { copyRtlText } from "./vite-plugins/copy-rtl-text";
 import { copyVectorOps } from "./vite-plugins/copy-vector-ops";
-import { proxyBinaryRequestGuarded } from "./vite-proxy-guard";
+import {
+  proxyAircraftRequestGuarded,
+  proxyAdsbdbAircraftRequestGuarded,
+  proxyBinaryRequestGuarded,
+  proxyAustinCctvFrameRequestGuarded,
+  proxyCalgaryCctvFrameRequestGuarded,
+  proxyCaltransCctvFrameRequestGuarded,
+  proxyCctvCatalogRequestGuarded,
+  proxyCelestrakRequestGuarded,
+  proxyLaunchLibraryRequestGuarded,
+  proxyOverpassRequestGuarded,
+  proxyFirmsRequestGuarded,
+  proxyTransitRequestGuarded,
+  proxyOntarioCctvFrameRequestGuarded,
+  proxyNswCctvFrameRequestGuarded,
+} from "./vite-proxy-guard";
+import { fastPathProxyPlugin } from "./vite-fast-path-proxy";
 
 const GEOAGENT_BROWSER_BUNDLE = "maplibre-gl-geoagent/dist/browser-";
+import { ARCGIS_SDK_HOST, ARCGIS_SDK_VERSION } from "../../packages/map/src/arcgis-sdk";
+
 const EARTH_ENGINE_CONTROL_BUNDLE = "maplibre-gl-earth-engine/dist/";
 const EARTH_ENGINE_BROWSER_BUNDLE = "@google/earthengine/build/browser.js";
 const GIS_CHUNK_WARNING_LIMIT_KB = 14000;
@@ -87,6 +106,18 @@ if (!process.env.VITE_MAPBOX_ACCESS_TOKEN) {
     process.env.MAPBOX_TOKEN || FILE_ENV.VITE_MAPBOX_ACCESS_TOKEN || FILE_ENV.MAPBOX_TOKEN;
   if (mapboxAccessToken) {
     process.env.VITE_MAPBOX_ACCESS_TOKEN = mapboxAccessToken;
+  }
+}
+
+// ArcGIS API key for the ArcGIS renderer's Esri basemap styles: same
+// bare→prefixed bridge. `ARCGIS_API_KEY` from the shell or an .env file is
+// surfaced as `VITE_ARCGIS_API_KEY`; getArcgisApiKey() then lets a runtime
+// Settings override win over this build-time value.
+if (!process.env.VITE_ARCGIS_API_KEY) {
+  const arcgisApiKey =
+    process.env.ARCGIS_API_KEY || FILE_ENV.VITE_ARCGIS_API_KEY || FILE_ENV.ARCGIS_API_KEY;
+  if (arcgisApiKey) {
+    process.env.VITE_ARCGIS_API_KEY = arcgisApiKey;
   }
 }
 
@@ -226,6 +257,7 @@ const BUILD_ENV_KEYS = [
   "VITE_GEOCODER_ENDPOINT",
   "VITE_GEOCODER_PROVIDER",
   "VITE_GEOCODER_REVERSE_ENDPOINT",
+  "VITE_GEOLENS_DEFAULT_URL",
   "VITE_GEOLIBRE_AI_MODEL",
   "VITE_GEOLIBRE_AI_URL",
   "VITE_GEOLIBRE_AUTH0_CLIENT_ID",
@@ -233,6 +265,7 @@ const BUILD_ENV_KEYS = [
   "VITE_GEOLIBRE_CAPABILITIES",
   "VITE_GEOLIBRE_CLERK_PUBLISHABLE_KEY",
   "VITE_GEOLIBRE_CLERK_WAITLIST",
+  "VITE_ARCGIS_API_KEY",
   "VITE_GEOLIBRE_COLLAB_URL",
   "VITE_GEOLIBRE_EMBED_ORIGINS",
   "VITE_GEOLIBRE_GA_MEASUREMENT_ID",
@@ -487,7 +520,22 @@ function gdal3CdnPaths(): { wasm: string; data: string } | null {
 const GDAL3_CDN_PATHS = gdal3CdnPaths();
 const WMS_PROXY_PATH = "/__geolibre_wms_proxy";
 const WFS_PROXY_PATH = "/__geolibre_wfs_proxy";
+const CSW_PROXY_PATH = "/__geolibre_csw_proxy";
 const GPX_PROXY_PATH = "/__geolibre_gpx_proxy";
+const CELESTRAK_PROXY_PATH = "/__geolibre_celestrak";
+const LAUNCH_LIBRARY_PROXY_PATH = "/launch-library/recent";
+const OPEN_SKY_PROXY_PATH = "/opensky/states";
+const ADSB_LOL_MILITARY_PROXY_PATH = "/adsb-lol/military";
+const ADSBDB_AIRCRAFT_PROXY_PATH = "/adsbdb/aircraft";
+const TRANSIT_PROXY_PATH = "/transit/vehicles";
+const FIRMS_PROXY_PATH = "/firms/viirs";
+const AUSTIN_CCTV_FRAME_PROXY_PATH = "/cctv/austin";
+const CALGARY_CCTV_FRAME_PROXY_PATH = "/cctv/calgary";
+const CCTV_CATALOG_PROXY_PATH = "/cctv/catalog";
+const ONTARIO_CCTV_FRAME_PROXY_PATH = "/cctv/ontario";
+const NSW_CCTV_FRAME_PROXY_PATH = "/cctv/nsw";
+const CALTRANS_CCTV_FRAME_PROXY_PATH = "/cctv/caltrans";
+const OVERPASS_PROXY_PATH = "/overpass";
 const RASTER_PROXY_PATH = "/__geolibre_raster_proxy";
 const DUCKDB_WORKER_PATH_PART = "/@duckdb/duckdb-wasm/dist/";
 const DUCKDB_WORKER_SOURCE_MAP_RE =
@@ -530,6 +578,10 @@ function manualChunks(id: string): string | undefined {
   // and the shell never mounts (see e2e/pwa.spec.ts). Let CSS and other assets
   // fall through to default handling so only their JS is code-split.
   if (!/\.[mc]?[jt]sx?(?:\?|$)/.test(id)) return undefined;
+  // A `?url` import (e.g. the DuckDB worker script) is a one-line module that
+  // exports the asset's URL. Named after its package, it landed in that
+  // package's chunk, so importing the URL string fetched all of DuckDB-WASM.
+  if (/\?(?:[^#]*&)?url(?:&|$)/.test(id)) return undefined;
   // Keep @duckdb/duckdb-wasm AND its apache-arrow dependency together in one
   // lazily-fetched chunk. apache-arrow is shared with maplibre-gl-duckdb; if it
   // is left to default chunking it can be hoisted into a chunk the eager
@@ -556,23 +608,130 @@ function manualChunks(id: string): string | undefined {
   // generic `maplibre-gl` rule below, which would fold it into the eager
   // `maplibre` chunk and force DuckDB into boot. Give it its own lazy chunk.
   if (id.includes("maplibre-gl-duckdb")) return "maplibre-duckdb";
+  if (id.includes("/mapbox-gl/")) return "mapbox";
+  // One chunk per `maplibre-gl-*` feature plugin (components, splat, 3d-tiles,
+  // lidar, …). A single shared chunk put ~12 MB of plugins, plus the
+  // dependencies they pull in (three, deck.gl, luma.gl), into the chunk that
+  // holds MapLibre core, which boots eagerly. Split per package, each plugin
+  // loads when its control is first used and boot fetches only MapLibre core.
+  const mapLibrePlugin = id.match(/\/node_modules\/(maplibre-gl-[^/]+)\//);
+  if (mapLibrePlugin) return mapLibrePlugin[1];
   if (id.includes("maplibre-gl")) return "maplibre";
-  // Cesium is large (~several MB) and only loads when the user opens the 3D
-  // globe view; keep it in its own lazily-fetched chunk, off the boot graph.
-  // The globe imports `@cesium/engine` directly rather than the `cesium`
-  // wrapper: the wrapper re-exports `@cesium/widgets` too, and that barrel
-  // defeats tree-shaking, so the widget chrome and Knockout shipped in this
-  // chunk even though the pane builds a bare `CesiumWidget`. The `cesium`
-  // package is still a dependency — copy-cesium-assets stages the runtime
-  // Workers/Assets from its prebuilt `Build/Cesium` — so both paths are matched
-  // here, which also keeps the intent if a future eager import appears.
-  if (id.includes("/node_modules/cesium/") || id.includes("/node_modules/@cesium/"))
-    return "cesium";
+  // Cesium is handled by a dedicated group in CODE_SPLITTING_GROUPS below, not
+  // here: a name returned from this function also captures the module's
+  // dependencies, which is how Cesium used to pull shared helpers into its
+  // chunk and onto the boot path.
   // Returning undefined hands remaining node_modules back to Rollup's default
   // chunking. We intentionally do not group them into a single "vendor" chunk:
   // that produced a circular manual-chunks warning. Do not re-add a catch-all
   // `return "vendor"` here without re-checking that warning.
   return undefined;
+}
+
+// Rolldown code-splitting groups. A group captures its matched modules AND,
+// by default, their dependencies recursively, and an earlier capture wins over
+// a later `manualChunks` name. When Cesium was named from manualChunks, its
+// chunk swallowed Vite's dynamic-import preload helper, tslib, and dompurify.
+// The entry imports the preload helper, so the whole ~4.7 MB Cesium chunk was
+// modulepreloaded on every boot. The higher-priority groups here claim those
+// shared modules first. The Cesium and manualChunks groups do not follow
+// dependencies, so each named chunk holds only its own package.
+const CODE_SPLITTING_GROUPS = [
+  { name: "preload-helper", test: /vite\/preload-helper/, priority: 3 },
+  { name: "tslib", test: /\/node_modules\/tslib\//, priority: 3 },
+  { name: "dompurify", test: /\/node_modules\/dompurify\//, priority: 3 },
+  // Cesium only loads when a pane switches to the 3D globe. The globe imports
+  // `@cesium/engine` directly rather than the `cesium` wrapper: the wrapper
+  // re-exports `@cesium/widgets` too, and that barrel defeats tree-shaking. The
+  // `cesium` package is still a dependency (copy-cesium-assets stages its
+  // runtime Workers/Assets), so both paths are matched.
+  {
+    name: "cesium",
+    test: /\/node_modules\/(?:cesium|@cesium)\//,
+    includeDependenciesRecursively: false,
+    priority: 2,
+  },
+  // The named chunks from manualChunks do not follow dependencies either. With
+  // recursion, whichever named chunk reached a shared library first absorbed
+  // it: `maplibre-duckdb` held all of deck.gl and luma.gl, `maplibre-gl-raster`
+  // held loaders.gl, and `maplibre-gl-components` held three.js. Any startup
+  // code that needed one of those libraries then fetched the whole plugin
+  // chunk, about 5.7 MB of plugins at boot. Shared libraries now land in
+  // Rolldown's default chunks and load only with code that uses them.
+  {
+    name: (id: string) => manualChunks(id) ?? null,
+    includeDependenciesRecursively: false,
+    priority: 1,
+  },
+];
+
+// Upper bound on the minified JS the app entry imports statically, i.e. what
+// index.html modulepreloads before the shell can mount. It measured ~2.2 MB
+// when this guard was added (MapLibre core is ~1.2 MB of it); it was ~19 MB
+// while Cesium and every MapLibre plugin sat on the boot path. Raise it only
+// deliberately, after confirming the new eager code actually belongs at boot.
+const BOOT_JS_BUDGET_BYTES = 3 * 1024 * 1024;
+
+/**
+ * Fails the build when the app entry's static import graph exceeds
+ * BOOT_JS_BUDGET_BYTES or includes Cesium. Chunk-grouping regressions are
+ * silent otherwise: the app still works, it just downloads megabytes more on
+ * every launch.
+ */
+function bootBundleBudgetPlugin(): Plugin {
+  return {
+    name: "geolibre-boot-bundle-budget",
+    apply: "build",
+    generateBundle(_, bundle) {
+      // Sizes are only meaningful once selectiveJsMinifyPlugin has run.
+      if (process.env.TAURI_DEBUG) return;
+      const entry = Object.values(bundle).find(
+        (chunk): chunk is OutputChunk =>
+          chunk.type === "chunk" && chunk.isEntry && chunk.name === "main",
+      );
+      // A missing entry would switch the guard off without anyone noticing,
+      // which is the kind of silent regression it exists to catch.
+      if (!entry) {
+        this.error(
+          'Boot bundle budget: no entry chunk named "main" found. Update ' +
+            "bootBundleBudgetPlugin if the build input key changed.",
+        );
+      }
+      const seen = new Set<string>();
+      const pending = [entry.fileName];
+      let bytes = 0;
+      const offenders: string[] = [];
+      while (pending.length > 0) {
+        const fileName = pending.pop()!;
+        if (seen.has(fileName)) continue;
+        seen.add(fileName);
+        const chunk = bundle[fileName];
+        if (chunk?.type !== "chunk") continue;
+        bytes += Buffer.byteLength(chunk.code);
+        if (chunk.moduleIds.some((id) => /\/node_modules\/(?:cesium|@cesium)\//.test(id))) {
+          offenders.push(`${fileName} contains Cesium`);
+        }
+        pending.push(...chunk.imports);
+      }
+      const mb = (n: number) => `${(n / 1024 / 1024).toFixed(2)} MB`;
+      if (bytes > BOOT_JS_BUDGET_BYTES) {
+        offenders.push(`boot JS is ${mb(bytes)}, over the ${mb(BOOT_JS_BUDGET_BYTES)} budget`);
+      }
+      if (offenders.length > 0) {
+        const largest = [...seen]
+          .map((fileName) => bundle[fileName])
+          .filter((chunk): chunk is OutputChunk => chunk?.type === "chunk")
+          .sort((a, b) => b.code.length - a.code.length)
+          .slice(0, 5)
+          .map((chunk) => `  ${chunk.fileName} (${mb(Buffer.byteLength(chunk.code))})`);
+        this.error(
+          `Boot bundle regression: ${offenders.join("; ")}.\n` +
+            `Largest statically imported chunks:\n${largest.join("\n")}\n` +
+            "See CODE_SPLITTING_GROUPS and manualChunks in vite.config.ts.",
+        );
+      }
+    },
+  };
 }
 
 function onwarn(warning: RollupLog, defaultHandler: WarningHandlerWithDefault): void {
@@ -626,6 +785,16 @@ function wmsProxyPlugin(): Plugin {
           res.end(message);
         }
       });
+      server.middlewares.use(CSW_PROXY_PATH, async (req, res) => {
+        try {
+          await proxyBinaryRequestGuarded(req, res, CSW_PROXY_PATH);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "CSW proxy request failed";
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end(message);
+        }
+      });
       server.middlewares.use(GPX_PROXY_PATH, async (req, res) => {
         try {
           await proxyBinaryRequestGuarded(req, res, GPX_PROXY_PATH);
@@ -634,6 +803,173 @@ function wmsProxyPlugin(): Plugin {
           res.statusCode = 502;
           res.setHeader("content-type", "text/plain");
           res.end(message);
+        }
+      });
+      server.middlewares.use(CELESTRAK_PROXY_PATH, async (req, res) => {
+        try {
+          await proxyCelestrakRequestGuarded(req, res, CELESTRAK_PROXY_PATH);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("CelesTrak proxy request failed");
+        }
+      });
+      server.middlewares.use(LAUNCH_LIBRARY_PROXY_PATH, async (_req, res) => {
+        try {
+          await proxyLaunchLibraryRequestGuarded(res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Launch Library 2 proxy request failed");
+        }
+      });
+      server.middlewares.use(OPEN_SKY_PROXY_PATH, async (_req, res) => {
+        try {
+          await proxyAircraftRequestGuarded("opensky", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("OpenSky proxy request failed");
+        }
+      });
+      server.middlewares.use(ADSB_LOL_MILITARY_PROXY_PATH, async (_req, res) => {
+        try {
+          await proxyAircraftRequestGuarded("military", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("adsb.lol proxy request failed");
+        }
+      });
+      server.middlewares.use(ADSBDB_AIRCRAFT_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(
+            req.url ?? "",
+            `http://localhost${ADSBDB_AIRCRAFT_PROXY_PATH}`,
+          );
+          const icao = decodeURIComponent(requestUrl.pathname.replace(/^\//, ""));
+          await proxyAdsbdbAircraftRequestGuarded(icao, res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("ADSBDB proxy request failed");
+        }
+      });
+      server.middlewares.use(TRANSIT_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(req.url ?? "", `http://localhost${TRANSIT_PROXY_PATH}`);
+          const feedId = decodeURIComponent(requestUrl.pathname.replace(/^\//, ""));
+          await proxyTransitRequestGuarded(feedId, res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Transit proxy request failed");
+        }
+      });
+      server.middlewares.use(FIRMS_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(req.url ?? "", `http://localhost${FIRMS_PROXY_PATH}`);
+          const satellite = decodeURIComponent(requestUrl.pathname.replace(/^\//, ""));
+          await proxyFirmsRequestGuarded(satellite, res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("NASA FIRMS proxy request failed");
+        }
+      });
+      server.middlewares.use(CALGARY_CCTV_FRAME_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(
+            req.url ?? "",
+            `http://localhost${CALGARY_CCTV_FRAME_PROXY_PATH}`,
+          );
+          const frameId = decodeURIComponent(requestUrl.pathname).match(/^\/(\d{1,4})\.jpg$/)?.[1];
+          await proxyCalgaryCctvFrameRequestGuarded(frameId ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Calgary CCTV frame request failed");
+        }
+      });
+      server.middlewares.use(AUSTIN_CCTV_FRAME_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(
+            req.url ?? "",
+            `http://localhost${AUSTIN_CCTV_FRAME_PROXY_PATH}`,
+          );
+          const frameId = decodeURIComponent(requestUrl.pathname).match(/^\/(\d{1,4})\.jpg$/)?.[1];
+          await proxyAustinCctvFrameRequestGuarded(frameId ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Austin CCTV frame request failed");
+        }
+      });
+      server.middlewares.use(CCTV_CATALOG_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(req.url ?? "", `http://localhost${CCTV_CATALOG_PROXY_PATH}`);
+          const provider = decodeURIComponent(requestUrl.pathname).match(
+            /^\/(ontario|drivebc|nsw|caltrans-(?:3|4|7|11))\.json$/,
+          )?.[1];
+          await proxyCctvCatalogRequestGuarded(provider ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("CCTV catalog request failed");
+        }
+      });
+      server.middlewares.use(ONTARIO_CCTV_FRAME_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(
+            req.url ?? "",
+            `http://localhost${ONTARIO_CCTV_FRAME_PROXY_PATH}`,
+          );
+          const frameId = decodeURIComponent(requestUrl.pathname).match(
+            /^\/([A-Za-z0-9_.-]{1,64})$/,
+          )?.[1];
+          await proxyOntarioCctvFrameRequestGuarded(frameId ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Ontario CCTV frame request failed");
+        }
+      });
+      server.middlewares.use(NSW_CCTV_FRAME_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(req.url ?? "", `http://localhost${NSW_CCTV_FRAME_PROXY_PATH}`);
+          const frameId = decodeURIComponent(requestUrl.pathname).match(
+            /^\/([a-z0-9_.&-]{1,100}\.(?:jpe?g))$/i,
+          )?.[1];
+          await proxyNswCctvFrameRequestGuarded(frameId ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("NSW CCTV frame request failed");
+        }
+      });
+      server.middlewares.use(CALTRANS_CCTV_FRAME_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(
+            req.url ?? "",
+            `http://localhost${CALTRANS_CCTV_FRAME_PROXY_PATH}`,
+          );
+          const match = decodeURIComponent(requestUrl.pathname).match(
+            /^\/(3|4|7|11)\/([a-z0-9-]{1,100})\.jpg$/i,
+          );
+          await proxyCaltransCctvFrameRequestGuarded(match?.[1] ?? "", match?.[2] ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Caltrans CCTV frame request failed");
+        }
+      });
+      server.middlewares.use(OVERPASS_PROXY_PATH, async (req, res) => {
+        try {
+          await proxyOverpassRequestGuarded(req, res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Overpass proxy request failed");
         }
       });
       server.middlewares.use(RASTER_PROXY_PATH, async (req, res) => {
@@ -706,6 +1042,10 @@ function selectiveJsMinifyPlugin(): Plugin {
           }
 
           const result = await transform(asset.code, {
+            // esbuild's default ASCII charset escapes every non-ASCII character,
+            // which inflates chunks that embed binary data as a string (the
+            // h5wasm HDF5 chunk grows ~0.8 MB). Vite emits UTF-8 anyway.
+            charset: "utf8",
             legalComments: "none",
             minify: true,
             target: "esnext",
@@ -918,9 +1258,11 @@ function pwaPlugin(): Plugin[] {
   // caches them on first use for offline. Hashed filenames make CacheFirst safe
   // (a redeploy mints new URLs, so a stale entry is never served as current).
   const HEAVY_PRECACHE_IGNORES = [
-    // MapLibre core (~13 MB) and its feature-plugin chunks. The map boots from
-    // its first runtime fetch and is CacheFirst-cached thereafter.
+    // MapLibre core (~1.2 MB) and the per-package `maplibre-gl-*` plugin
+    // chunks. The map boots from its first runtime fetch and is
+    // CacheFirst-cached thereafter.
     "**/maplibre-*",
+    "**/mapbox-*",
     "**/duckdb-*",
     // CesiumJS (~4.6 MB) for the 3D-globe view. Lazily imported only when a pane
     // switches to the globe, so it is CacheFirst-cached on first use rather than
@@ -1010,7 +1352,9 @@ function pwaPlugin(): Plugin[] {
       // Precache the app shell: HTML plus the JS/CSS/fonts that boot the map.
       // The heavy lazily-fetched chunks/binaries are runtime-cached instead.
       globPatterns: ["**/*.{js,css,html,woff,woff2}"],
-      globIgnores: HEAVY_PRECACHE_IGNORES,
+      // Deployment configuration changes independently of the application build.
+      // Never pin it to a build revision in the service worker.
+      globIgnores: [...HEAVY_PRECACHE_IGNORES, "**/geolibre-runtime-config.js"],
       // deck.gl/vendor shell chunks can run a few MB; allow them into the
       // precache. MapLibre and the huge binaries are globIgnored above.
       maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
@@ -1075,6 +1419,24 @@ function pwaPlugin(): Plugin[] {
           },
         },
         {
+          // The ArcGIS Maps SDK for JavaScript, imported per module from Esri's
+          // versioned ES-module CDN by the ArcGIS renderer
+          // (packages/map/src/arcgis-sdk.ts), plus its stylesheet, fonts and
+          // workers from the same versioned prefix. Its own cache, not the
+          // engines' one above: a first load is a few hundred small modules,
+          // enough to evict a previously cached engine from a 400-entry cache
+          // and take it offline. The version is in every path, so a bump mints
+          // new URLs and CacheFirst never serves a stale SDK.
+          urlPattern: ({ url }: { url: URL }) =>
+            url.hostname === ARCGIS_SDK_HOST && url.pathname.startsWith(`/${ARCGIS_SDK_VERSION}/`),
+          handler: "CacheFirst",
+          options: {
+            cacheName: "geolibre-arcgis-sdk",
+            expiration: { maxEntries: 1500, maxAgeSeconds: 60 * 60 * 24 * 30 },
+            cacheableResponse: { statuses: [0, 200] },
+          },
+        },
+        {
           // Basemap tiles/styles from the CORS-friendly default hosts only
           // (OpenFreeMap, CARTO). Other remote tiles/services stay network-only
           // by design — see docs for what is and isn't available offline.
@@ -1117,7 +1479,9 @@ export default defineConfig({
     copyCesiumAssets(path.resolve(__dirname, "public/cesium")),
     react(),
     wmsProxyPlugin(),
+    fastPathProxyPlugin(),
     selectiveJsMinifyPlugin(),
+    bootBundleBudgetPlugin(),
     removeJupyterLiteFromTauriDistPlugin(),
     ...pwaPlugin(),
   ],
@@ -1140,6 +1504,18 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // Bind the IPv4 loopback explicitly. Vite's default (`localhost`) resolves
+    // through the OS, which on a dual-stack Linux box binds `[::1]` only — so a
+    // reverse proxy dialing `127.0.0.1:5173` (e.g. `tailscale serve`, which
+    // targets IPv4 loopback by default) gets connection-refused and returns
+    // 502. Still loopback-only: this does not expose the dev server on the LAN.
+    host: "127.0.0.1",
+    // Vite rejects requests whose Host header it does not recognise. Reaching
+    // the dev server over Tailscale (`tailscale serve --bg 5173`) forwards the
+    // original `<machine>.<tailnet>.ts.net` Host, which would otherwise be
+    // answered with "Blocked request". `.ts.net` names are only resolvable
+    // inside the tailnet, so allowing them does not widen public exposure.
+    allowedHosts: [".ts.net"],
     watch: {
       // Never watch the Rust side. `tauri dev` runs this dev server as its
       // `beforeDevCommand` and then starts cargo in the same tree, so the
@@ -1157,6 +1533,10 @@ export default defineConfig({
   },
   worker: {
     format: "es",
+    // Worker bundles are separate builds that do not inherit the top-level
+    // plugins, and `build.minify` is off, so without this the MapLibre worker
+    // (loaded on every map start) and the tool workers ship unminified.
+    plugins: () => [selectiveJsMinifyPlugin()],
   },
   envPrefix: ["VITE_", "TAURI_"],
   optimizeDeps: {
@@ -1183,6 +1563,14 @@ export default defineConfig({
       // pre-bundled via the deck.gl-geotiff static import.)
       "proj4",
       "geotiff-geokeys-to-proj4",
+      // cog-tiler-wasm's mask-aware LERC decoder (lerc-decoder.js) reaches
+      // these through dynamic import() the first time a LERC COG opens; they
+      // are geotiff's own codec packages, listed here for the same
+      // discover-and-reload reason as above. The raster loader supplies LERC's
+      // WASM URL explicitly, so its ESM decoder can also be pre-bundled.
+      "lerc",
+      "pako",
+      "zstddec",
       // Cesium (the 3D-globe view). Pre-bundle it up front so esbuild applies
       // CJS→ESM interop to its CommonJS transitive deps (e.g. mersenne-twister,
       // which has no ESM entry): without this, the dev server serves those raw
@@ -1206,6 +1594,17 @@ export default defineConfig({
       // leave `@cesium/engine` to be discovered on first open — the full-page
       // reload this list exists to prevent.
       "@cesium/engine",
+      // Cesium's toolbar widgets (the globe's home and scene-mode buttons),
+      // reached through a second lazy import in CesiumCanvas's mount effect.
+      // Listed for the same reason as the engine above: without it Vite
+      // discovers the package on first open of the globe and triggers a
+      // full-page reload to re-optimize.
+      "@cesium/widgets",
+      // The globe's Zarr imagery provider, imported on the first Zarr layer the
+      // globe draws; listed so that first draw does not trigger a re-optimize
+      // reload. Its `cesium` import resolves to `@cesium/engine` (see
+      // `resolve.alias`), so it shares the pre-bundled engine above.
+      "zarr-cesium",
     ],
     // PGlite ships its own WASM + filesystem bundles and must not be pre-bundled
     // by esbuild, which mangles those asset references (per PGlite's Vite guide).
@@ -1247,11 +1646,19 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_DEBUG,
     chunkSizeWarningLimit: GIS_CHUNK_WARNING_LIMIT_KB,
     rollupOptions: {
+      // Two pages: the app shell and the standalone OAuth callback. The
+      // callback gets its own entry so its tiny script is compiled through
+      // Vite (base-path-aware asset URLs) instead of shipped as raw inline
+      // HTML; see oauth-callback.html.
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        oauthCallback: path.resolve(__dirname, "oauth-callback.html"),
+      },
       onwarn,
       output: {
-        manualChunks,
+        codeSplitting: { groups: CODE_SPLITTING_GROUPS },
       },
-    } satisfies RollupOptions,
+    } satisfies RolldownOptions,
   },
   resolve: {
     // `@anthropic-ai/sdk` (and the other assistant provider SDKs) are optional
@@ -1263,12 +1670,22 @@ export default defineConfig({
     // these forces resolution from this app's node_modules — where they are always
     // installed — so the build is deterministic across environments (see #331).
     dedupe: ["react", "react-dom", "maplibre-gl", "@anthropic-ai/sdk", "openai", "@google/genai"],
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
+    alias: [
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
       // The published package resolves to dist, but the monorepo app should
       // hot-reload SDK source during development.
-      "@geolibre/embed": path.resolve(__dirname, "../../packages/embed/src/index.ts"),
-      module: path.resolve(__dirname, "./src/lib/browser-node-module.ts"),
-    },
+      {
+        find: "@geolibre/embed",
+        replacement: path.resolve(__dirname, "../../packages/embed/src/index.ts"),
+      },
+      { find: "module", replacement: path.resolve(__dirname, "./src/lib/browser-node-module.ts") },
+      // zarr-cesium (the globe's Zarr layers) and its wind layer import the
+      // `cesium` wrapper, but only engine classes. Point the bare specifier at
+      // the `@cesium/engine` the globe already loads, so there is one engine
+      // instance (one set of classes, one worker pool) and the wrapper's
+      // `@cesium/widgets` barrel stays out of the bundle. Exact match only:
+      // nothing in the bundle imports a `cesium/...` subpath.
+      { find: /^cesium$/, replacement: "@cesium/engine" },
+    ],
   },
 });

@@ -1095,11 +1095,27 @@ body,
   z-index: 3;
 }
 
-.maplibregl-control-container {
+/* Both 2D engines: mapbox-gl leaves its control container static, so without
+   this its corners (z-index 2) would sit under the Effects plugin's z-4 map
+   canvas and every control on a Mapbox map would be buried. */
+.maplibregl-control-container,
+.mapboxgl-control-container {
   inset: 0;
   pointer-events: none;
   position: absolute;
   z-index: 2;
+}
+
+/* Popups on a Mapbox map. Every MapLibre popup (identify, the Geo Editor's
+   numerical-rotation form) sits above the Effects plugin's z-4 map canvas only
+   because maplibre-gl-components ships `.maplibregl-popup { z-index: 10 !important }`
+   globally. mapbox-gl's popup has no such lift, so with effects on it opens
+   underneath the canvas: visible through nothing and unclickable. Match the
+   MapLibre value so the two engines stack popups the same way. `!important`
+   as upstream's: mapbox-gl.css is loaded by a dynamic import after this
+   sheet, so a same-specificity rule there would otherwise win. */
+.mapboxgl-popup {
+  z-index: 10 !important;
 }
 
 /*
@@ -1155,7 +1171,8 @@ body,
  * top-right controls. Lift the controls above the comparison map. The
  * `!important` is needed to beat the Effects plugin's inline z-index.
  */
-.maplibregl-control-container {
+.maplibregl-control-container,
+.mapboxgl-control-container {
   z-index: 7 !important;
 }
 
@@ -1254,6 +1271,164 @@ body,
   outline: none;
   padding: 2px 6px;
   transform: translate(-2px, -2px);
+}
+
+/*
+ * Dimension tools control. Same plain `.maplibregl-ctrl-group` chrome as the
+ * Annotation tools control above, plus the unit and "tie to layer" <select>
+ * elements the Dimension toolbar adds.
+ */
+.geolibre-dimensions-control {
+  --geolibre-dimensions-cell-size: 29px;
+  background-color: hsl(var(--background)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.geolibre-dimensions-control .geolibre-dimensions-tools {
+  display: flex;
+  flex-direction: column;
+}
+
+.geolibre-dimensions-control .geolibre-dimensions-tools[hidden] {
+  display: none;
+}
+
+.geolibre-dimensions-control button {
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  display: flex !important;
+  height: var(--geolibre-dimensions-cell-size);
+  justify-content: center;
+  padding: 0;
+  width: var(--geolibre-dimensions-cell-size);
+}
+
+.geolibre-dimensions-control button > svg {
+  display: block;
+  flex: 0 0 auto;
+  margin: 0 auto;
+}
+
+/* `!important`: MapLibre's own `.maplibregl-ctrl button:not(:disabled):hover`
+ * rule is *more* specific than a plain `.geolibre-dimensions-control button`
+ * rule (two pseudo-classes vs. none), so it otherwise wins outright and
+ * replaces this background with its own low-contrast `rgba(0,0,0,.05)`,
+ * making the icon nearly disappear on hover. */
+.geolibre-dimensions-control button:not(.is-active):hover {
+  background-color: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
+}
+
+.geolibre-dimensions-control button.is-active {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+/* Same fight as above, but for a button that's both active and hovered: the
+ * `:not(.is-active):hover` rule above deliberately excludes `.is-active`
+ * buttons (so hovering an active tool doesn't wash out its highlight color),
+ * but that also means nothing was countering MapLibre's own hover rule for
+ * them, and `.is-active` alone (no `!important`) is not specific enough to
+ * beat it. Confirmed in a real browser: without this, an active tool's solid
+ * `--primary` background reverted to MapLibre's near-transparent black the
+ * moment it was hovered. */
+.geolibre-dimensions-control button.is-active:hover {
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+}
+
+.geolibre-dimensions-control .geolibre-dimensions-collapse {
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.geolibre-dimensions-control.is-collapsed .geolibre-dimensions-collapse {
+  border-bottom: 0;
+}
+
+.geolibre-dimensions-control .geolibre-dimensions-tools button + button,
+.geolibre-dimensions-control .geolibre-dimensions-width,
+.geolibre-dimensions-control .geolibre-dimensions-color {
+  border-top: 1px solid hsl(var(--border));
+}
+
+.geolibre-dimensions-control .geolibre-dimensions-color {
+  border: none;
+  border-top: 1px solid hsl(var(--border));
+  cursor: pointer;
+  height: 24px;
+  /* Flush against the same left edge the tool icons sit at (they fill the
+   * full `--geolibre-dimensions-cell-size` column width and center their
+   * icon within it), not centered across the toolbar's full width — which
+   * is set by the wider unit `<select>` and made the swatch look adrift. */
+  margin: 2px 0 2px 2.5px;
+  padding: 0;
+  width: 24px;
+}
+
+.geolibre-dimensions-control .geolibre-dimensions-unit {
+  /* Matches @geolibre/ui's own <Input>: transparent fill + a `--input`
+   * border, not a filled surface color. An earlier attempt filled it with
+   * `--secondary`, but that token is nearly as dark as the panel itself in
+   * the dark theme (and in every color theme — only `--primary`/`--accent`
+   * shift with the user's theme choice, not the neutral surface tokens), so
+   * it still read as a stray black box. Transparent + a clearly visible
+   * border is both lighter-weight and what the rest of the app already does
+   * for a form control sitting on a themed surface. */
+  background-color: transparent;
+  border: 1px solid hsl(var(--input));
+  border-radius: 6px;
+  /* `!important`: with `color-scheme: dark` set below, Chromium/WebView2 can
+   * paint the select's own closed-state text (not the open <option> popup,
+   * which renders through a different, CSS-respecting path) from its native
+   * dark-mode "field text" color instead of this declaration, reading as
+   * near-black-on-transparent. Same class of cascade fight as the button
+   * hover fix above, same fix. */
+  color: hsl(var(--foreground)) !important;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  margin: 4px;
+  max-width: 160px;
+  min-width: 110px;
+  padding: 4px 28px 4px 8px;
+  /* Same technique as .maplibre-gl-zarr-layer-select: the native disclosure
+   * arrow's color is unreliable across webviews even with `color-scheme`
+   * set, so replace it with a CSS-drawn chevron tinted from `color`,
+   * guaranteeing it's visible regardless of theme. */
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, hsl(var(--foreground)) 50%),
+    linear-gradient(135deg, hsl(var(--foreground)) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 50%,
+    calc(100% - 11px) 50%;
+  background-repeat: no-repeat;
+  background-size: 5px 5px;
+}
+
+/* The open <option> popup can't be transparent (it floats over whatever's
+ * behind it, not the toolbar), so give it a real surface: `--popover` /
+ * `--popover-foreground` are the tokens @geolibre/ui's own DropdownMenuContent
+ * uses for this exact floating-menu-surface role, matching the rest of the
+ * app's dropdowns instead of inventing a one-off color here. `color-scheme`
+ * alone is unreliable across webviews for this (see the graticule panel
+ * above), hence the explicit background/color. */
+.geolibre-dimensions-control .geolibre-dimensions-unit option {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  font-weight: 500;
+}
+
+.dark .geolibre-dimensions-control .geolibre-dimensions-unit {
+  color-scheme: dark;
 }
 
 /*
@@ -1687,6 +1862,37 @@ body,
   color-scheme: dark;
 }
 
+/* The God's Eye View panel is plain DOM like the graticule panel above, so
+   theme its native speed select (and its dropdown popup) from the tokens. */
+.geolibre-gods-eye-view-panel select {
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  color: hsl(var(--foreground));
+  padding: 2px 4px;
+}
+
+.geolibre-gods-eye-view-panel select option {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.dark .geolibre-gods-eye-view-panel select {
+  color-scheme: dark;
+}
+
+/* The NLDI panel uses native selects. Theme their option popups explicitly so
+   dropdown text remains visible when the app theme differs from the OS theme. */
+.geolibre-usgs-nldi-panel select option {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.dark .geolibre-usgs-nldi-panel select,
+.dark .geolibre-usgs-nldi-panel input {
+  color-scheme: dark;
+}
+
 .geolibre-colorbar-control .colorbar-gui-input,
 .geolibre-colorbar-control .colorbar-gui-select,
 .geolibre-colorbar-control .colorbar-gui-textarea,
@@ -2035,6 +2241,14 @@ body,
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' fill='none' stroke='%2333b5e5' viewBox='0 0 22 22'%3E%3Ccircle cx='11' cy='11' r='8.5'/%3E%3Cpath d='M17.5 11c0 4.819-3.02 8.5-6.5 8.5S4.5 15.819 4.5 11 7.52 2.5 11 2.5s6.5 3.681 6.5 8.5Z'/%3E%3Cpath d='M13.5 11c0 2.447-.331 4.64-.853 6.206-.262.785-.562 1.384-.872 1.777-.314.399-.58.517-.775.517s-.461-.118-.775-.517c-.31-.393-.61-.992-.872-1.777C8.831 15.64 8.5 13.446 8.5 11s.331-4.64.853-6.206c.262-.785.562-1.384.872-1.777.314-.399.58-.517.775-.517s.461.118.775.517c.31.393.61.992.872 1.777.522 1.565.853 3.76.853 6.206Z'/%3E%3Cpath d='M11 7.5c-1.909 0-3.622-.166-4.845-.428-.616-.132-1.08-.283-1.379-.434a1.3 1.3 0 0 1-.224-.138q.07-.058.224-.138c.299-.151.763-.302 1.379-.434C7.378 5.666 9.091 5.5 11 5.5s3.622.166 4.845.428c.616.132 1.08.283 1.379.434.105.053.177.1.224.138q-.07.058-.224.138c-.299.151-.763.302-1.379.434-1.223.262-2.936.428-4.845.428ZM4.486 6.436ZM11 16.5c-1.909 0-3.622-.166-4.845-.428-.616-.132-1.08-.283-1.379-.434a1.3 1.3 0 0 1-.224-.138 1.3 1.3 0 0 1 .224-.138c.299-.151.763-.302 1.379-.434C7.378 14.666 9.091 14.5 11 14.5s3.622.166 4.845.428c.616.132 1.08.283 1.379.434.105.053.177.1.224.138a1.3 1.3 0 0 1-.224.138c-.299.151-.763.302-1.379.434-1.223.262-2.936.428-4.845.428Zm-6.514-1.064ZM11 12.5c-2.46 0-4.672-.222-6.255-.574-.796-.177-1.406-.38-1.805-.59a1.5 1.5 0 0 1-.39-.272.3.3 0 0 1-.047-.064.3.3 0 0 1 .048-.064c.066-.073.189-.167.389-.272.399-.21 1.009-.413 1.805-.59C6.328 9.722 8.54 9.5 11 9.5s4.672.222 6.256.574c.795.177 1.405.38 1.804.59.2.105.323.2.39.272a.3.3 0 0 1 .047.064.3.3 0 0 1-.048.064 1.4 1.4 0 0 1-.389.272c-.399.21-1.009.413-1.804.59-1.584.352-3.796.574-6.256.574Zm-8.501-1.51v.002zm0 .018v.002zm17.002.002v-.002zm0-.018v-.002z'/%3E%3C/svg%3E");
 }
 
+/* The ArcGIS SDK draws a focus ring over its view surface on any focus, so a
+ * click or drag on the map framed the whole pane in blue, which no other
+ * engine does. Keep the ring for keyboard focus only (the SDK's arrow-key and
+ * +/- navigation), where it tells the user the map has focus. */
+.geolibre-arcgis-canvas .esri-view .esri-view-surface:focus:not(:focus-visible)::after {
+  outline: none;
+}
+
 /* MapLibre's native globe and fullscreen glyphs are CSS background images.
  * Chromium otherwise drops them when an embedded map is printed to PDF, even
  * though controls backed by inline SVG remain visible. */
@@ -2148,7 +2362,7 @@ body,
   color: #1f2a37;
 }
 
-.geolibre-identify-popup .maplibregl-popup-content {
+.geolibre-identify-popup :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
   box-shadow:
@@ -2179,9 +2393,100 @@ body,
   flex: 1 1 auto;
   min-height: 0;
   max-height: min(560px, calc(100vh - 184px));
-  overflow-y: scroll;
+  overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+}
+
+/* Image fields need the popup width, not the narrow value column used by text
+   attributes. The popup can be resized and the image opens at its native size
+   in a new tab, while ordinary identify popups retain their compact layout. */
+.geolibre-identify-popup-root:has(.geolibre-popup-image) {
+  width: min(420px, calc(100vw - 48px));
+  max-width: min(85vw, 900px);
+  resize: both;
+}
+
+/* Cesium supplies its own absolutely positioned popup shell. Make that the
+   sole resize surface and let its contents track both dimensions, avoiding a
+   second nested handle that only resizes the child. */
+/* `!important` because the popup root may carry an inline width from an
+   author's `LayerPopupConfig.maxWidth`; here the resizable shell owns the
+   width and the root has to fill it, or the drag handle would resize a box
+   whose contents stayed pinned. */
+.geolibre-identify-image-popup > div,
+.geolibre-identify-image-popup .geolibre-identify-popup-root {
+  width: 100% !important;
+  height: 100%;
+  max-width: none !important;
+  max-height: none;
+}
+
+.geolibre-identify-image-popup .geolibre-identify-popup-root {
+  resize: none;
+}
+
+.geolibre-identify-image-popup .geolibre-identify-popup-rows {
+  display: flex;
+  flex-direction: column;
+  max-height: none;
+}
+
+.geolibre-identify-popup-image-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.geolibre-identify-image-popup .geolibre-identify-popup-image-row {
+  flex: 1 1 auto;
+  min-height: 180px;
+}
+
+.geolibre-identify-image-popup .geolibre-popup-image-cell,
+.geolibre-identify-image-popup .geolibre-popup-image-link {
+  height: 100%;
+}
+
+.geolibre-popup-image-link {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+/* `--geolibre-popup-image-height` is the per-layer override a popup config can
+   publish (LayerPopupConfig.imageHeight, applied by applyPopupImageHeight in
+   @geolibre/map); with none set the thumbnail keeps the height it always had. */
+.geolibre-popup-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: var(--geolibre-popup-image-height, min(50vh, 420px));
+  object-fit: contain;
+  background: hsl(var(--muted));
+}
+
+/* The thumbnail an `auto` field draws for an inline base64 image. Its own
+   default is smaller than a configured `image` field's, because it shows up
+   unasked for in geotagged-photo and field-collection layers. */
+.geolibre-popup-inline-image {
+  max-height: var(--geolibre-popup-image-height, 10rem);
+  max-width: 100%;
+}
+
+.geolibre-identify-image-popup .geolibre-popup-image {
+  max-height: none;
+}
+
+/* Fill the backdrop for a photo big enough to stand it, but stop at twice the
+   source's own resolution: the pinned traffic cameras only serve 320x260
+   stills, and blowing one up to the viewport is just a bigger blur. The caps
+   come from the viewer, which sets them once the image reports a natural size. */
+.geolibre-popup-image-viewer-img {
+  max-width: min(calc(100vw - 4rem), var(--geolibre-popup-image-max-w, 100vw));
+  max-height: min(calc(100vh - 4rem), var(--geolibre-popup-image-max-h, 100vh));
+  object-fit: contain;
 }
 
 /* The attribute-table toolbar wraps into several rows on portrait phones. Its
@@ -2227,7 +2532,7 @@ body,
    it and give it a real square target. `right: auto` first so the logical
    inset wins over MapLibre's own physical `right: 0` in both directions — the
    popup content mirrors with the UI in a right-to-left locale. */
-.geolibre-identify-popup .maplibregl-popup-close-button {
+.geolibre-identify-popup :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button) {
   /* `right: auto` must precede the logical inset: within one block the two
      resolve in source order, so declaring it after would win in LTR and leave
      the button unpositioned. */
@@ -2245,20 +2550,32 @@ body,
   width: 1.25rem;
 }
 
-.geolibre-identify-popup .maplibregl-popup-close-button:hover {
+.geolibre-identify-popup :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button):hover {
   background: hsl(var(--accent));
   color: hsl(var(--accent-foreground));
 }
 
-.geolibre-identify-popup.maplibregl-popup-anchor-top .maplibregl-popup-tip,
-.geolibre-identify-popup.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
-.geolibre-identify-popup.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-top, .mapboxgl-popup-anchor-top)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-top-left, .mapboxgl-popup-anchor-top-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-top-right, .mapboxgl-popup-anchor-top-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-bottom-color: hsl(var(--popover));
 }
 
-.geolibre-identify-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
-.geolibre-identify-popup.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
-.geolibre-identify-popup.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-bottom, .mapboxgl-popup-anchor-bottom)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-identify-popup:is(
+    .maplibregl-popup-anchor-bottom-left,
+    .mapboxgl-popup-anchor-bottom-left
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-identify-popup:is(
+    .maplibregl-popup-anchor-bottom-right,
+    .mapboxgl-popup-anchor-bottom-right
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-top-color: hsl(var(--popover));
 }
 
@@ -2272,7 +2589,7 @@ body,
   z-index: 5;
 }
 
-.geolibre-hover-tooltip .maplibregl-popup-content {
+.geolibre-hover-tooltip :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
   border-radius: 0.375rem;
@@ -2283,27 +2600,50 @@ body,
   padding: 0.375rem 0.5rem;
 }
 
-.geolibre-hover-tooltip.maplibregl-popup-anchor-top .maplibregl-popup-tip,
-.geolibre-hover-tooltip.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
-.geolibre-hover-tooltip.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-top, .mapboxgl-popup-anchor-top)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-top-left, .mapboxgl-popup-anchor-top-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-top-right, .mapboxgl-popup-anchor-top-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-bottom-color: hsl(var(--popover));
 }
 
-.geolibre-hover-tooltip.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
-.geolibre-hover-tooltip.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
-.geolibre-hover-tooltip.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-bottom, .mapboxgl-popup-anchor-bottom)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-bottom-left, .mapboxgl-popup-anchor-bottom-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-hover-tooltip:is(
+    .maplibregl-popup-anchor-bottom-right,
+    .mapboxgl-popup-anchor-bottom-right
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-top-color: hsl(var(--popover));
 }
 
-.geolibre-hover-tooltip.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-left, .mapboxgl-popup-anchor-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-right-color: hsl(var(--popover));
 }
 
-.geolibre-hover-tooltip.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-right, .mapboxgl-popup-anchor-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-left-color: hsl(var(--popover));
 }
 
 @media (max-width: 767px) {
+  /* Only the legacy Components grid needs a viewport-based fallback. The
+     standalone panels below calculate their own map-relative height limits. */
+  .geolibre-components-control .maplibre-gl-control-grid-floating-panel,
+  .geolibre-components-control .maplibre-gl-control-grid-relocated {
+    max-height: calc(100vh - 96px) !important;
+    max-height: calc(100dvh - 96px) !important;
+    overflow-y: auto;
+  }
+
+  /* Preserve mobile width bounds without overriding map-relative heights.
+     A viewport-based height cap ignores sidebar strips and the status bar,
+     leaving the bottom of these panels' scroll areas clipped. */
   .geolibre-components-control .maplibre-gl-control-grid-floating-panel,
   .geolibre-components-control .maplibre-gl-control-grid-relocated,
   .geolibre-pmtiles-control .maplibre-gl-pmtiles-layer-panel,
@@ -2312,11 +2652,7 @@ body,
   .maplibregl-map .layer-control-panel,
   .duckdb-control-panel {
     box-sizing: border-box;
-    /* 96px clears the mobile top toolbar plus the panel's own top offset */
-    max-height: calc(100vh - 96px) !important;
-    max-height: calc(100dvh - 96px) !important;
     max-width: calc(100vw - 20px) !important;
-    overflow-y: auto;
   }
 
   .duckdb-control-panel {
@@ -2325,7 +2661,7 @@ body,
     width: calc(100vw - 20px) !important;
   }
 
-  .geolibre-identify-popup .maplibregl-popup-content {
+  .geolibre-identify-popup :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
     max-width: calc(100vw - 24px);
   }
 }
@@ -2340,17 +2676,20 @@ body,
   }
 }
 
-.geolibre-identify-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-left, .mapboxgl-popup-anchor-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-right-color: hsl(var(--popover));
 }
 
-.geolibre-identify-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-right, .mapboxgl-popup-anchor-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-left-color: hsl(var(--popover));
 }
 
 /* The draggable photo-placement pin's hint popup (manual placement of a
    non-geotagged photo). Themed to match the app's popover surface. */
-.geolibre-placement-popup-root .maplibregl-popup-content {
+.geolibre-placement-popup-root .maplibregl-popup-content,
+.maplibregl-ctrl.geolibre-placement-popup {
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
   border-radius: 0.5rem;
@@ -2412,7 +2751,7 @@ body,
 
 /* Geotagged-photo popup: a resizable box whose photo scales to fill it, so the
    user can drag the corner to see more detail. */
-.geolibre-photo-popup-root .maplibregl-popup-content {
+.geolibre-photo-popup-root :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
   border-radius: 0.5rem;
@@ -2423,33 +2762,47 @@ body,
   padding: 0.5rem;
 }
 
-.geolibre-photo-popup-root .maplibregl-popup-close-button {
+.geolibre-photo-popup-root :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button) {
   color: hsl(var(--muted-foreground));
   padding-right: 0.25rem;
 }
 
-.geolibre-photo-popup-root .maplibregl-popup-close-button:hover {
+.geolibre-photo-popup-root :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button):hover {
   background: transparent;
   color: hsl(var(--popover-foreground));
 }
 
-.geolibre-photo-popup-root.maplibregl-popup-anchor-top .maplibregl-popup-tip,
-.geolibre-photo-popup-root.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
-.geolibre-photo-popup-root.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-top, .mapboxgl-popup-anchor-top)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-top-left, .mapboxgl-popup-anchor-top-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-top-right, .mapboxgl-popup-anchor-top-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-bottom-color: hsl(var(--popover));
 }
 
-.geolibre-photo-popup-root.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
-.geolibre-photo-popup-root.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
-.geolibre-photo-popup-root.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-bottom, .mapboxgl-popup-anchor-bottom)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-photo-popup-root:is(
+    .maplibregl-popup-anchor-bottom-left,
+    .mapboxgl-popup-anchor-bottom-left
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-photo-popup-root:is(
+    .maplibregl-popup-anchor-bottom-right,
+    .mapboxgl-popup-anchor-bottom-right
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-top-color: hsl(var(--popover));
 }
 
-.geolibre-photo-popup-root.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-left, .mapboxgl-popup-anchor-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-right-color: hsl(var(--popover));
 }
 
-.geolibre-photo-popup-root.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-right, .mapboxgl-popup-anchor-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-left-color: hsl(var(--popover));
 }
 
@@ -3011,6 +3364,25 @@ body,
   border-color: hsl(var(--ring));
   box-shadow: inset 0 0 0 1px hsl(var(--ring));
   outline: none;
+}
+
+/* mapbox-gl sizes its native control buttons (fullscreen, navigation,
+   geolocate) at 32px, while MapLibre's are 29px. On a Mapbox pane those sit in
+   one stack with the shared MapLibre-classed controls (compass, globe, layer
+   control), so bring the native ones down to the same size as the rest of the
+   cluster. The icons are centered background images, so they simply recenter. */
+.mapboxgl-map .mapboxgl-ctrl-group button {
+  height: 29px;
+  width: 29px;
+}
+
+/* These shared controls retain MapLibre class names when mounted in Mapbox.
+   Match the native top-left control spacing so their button-anchored panels
+   also clear the map edges and the Layers sidebar. */
+.mapboxgl-ctrl-top-left
+  > :is(.geolibre-vector-control, .geolibre-raster-control, .basemap-control) {
+  margin: 10px 0 0 10px;
+  float: left;
 }
 
 /* maplibre-gl-raster themes its panel from prefers-color-scheme (the OS
@@ -3651,47 +4023,61 @@ html.dark .maplibregl-popup-anchor-right:has(.vector-control-popup) .maplibregl-
 }
 
 /* Feature-properties and numeric-rotation popups rendered on the map. Their
-   content sits in MapLibre's always-white `.maplibregl-popup-content`, so the
-   popup surface (and its anchor tip) must be themed along with the text —
-   otherwise the token-mapped text goes light-on-white in dark mode. Mirrors
-   the `.geolibre-identify-popup` treatment above. */
-.geo-editor-properties-popup .maplibregl-popup-content,
-.geo-editor-rotate-popup .maplibregl-popup-content {
+   content sits in the engine's always-white popup content box (MapLibre's
+   `.maplibregl-popup-content`, mapbox-gl's `.mapboxgl-popup-content` when the
+   Geo Editor runs on the Mapbox renderer), so the popup surface (and its
+   anchor tip) must be themed along with the text — otherwise the token-mapped
+   text goes light-on-white in dark mode. Mirrors the `.geolibre-identify-popup`
+   treatment above. */
+:is(.geo-editor-properties-popup, .geo-editor-rotate-popup)
+  :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
   color: hsl(var(--popover-foreground));
 }
 
-.geo-editor-properties-popup .maplibregl-popup-close-button,
-.geo-editor-rotate-popup .maplibregl-popup-close-button {
+:is(.geo-editor-properties-popup, .geo-editor-rotate-popup)
+  :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button) {
   color: hsl(var(--muted-foreground));
 }
 
 :is(.geo-editor-properties-popup, .geo-editor-rotate-popup):is(
     .maplibregl-popup-anchor-top,
     .maplibregl-popup-anchor-top-left,
-    .maplibregl-popup-anchor-top-right
+    .maplibregl-popup-anchor-top-right,
+    .mapboxgl-popup-anchor-top,
+    .mapboxgl-popup-anchor-top-left,
+    .mapboxgl-popup-anchor-top-right
   )
-  .maplibregl-popup-tip {
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-bottom-color: hsl(var(--popover));
 }
 
 :is(.geo-editor-properties-popup, .geo-editor-rotate-popup):is(
     .maplibregl-popup-anchor-bottom,
     .maplibregl-popup-anchor-bottom-left,
-    .maplibregl-popup-anchor-bottom-right
+    .maplibregl-popup-anchor-bottom-right,
+    .mapboxgl-popup-anchor-bottom,
+    .mapboxgl-popup-anchor-bottom-left,
+    .mapboxgl-popup-anchor-bottom-right
   )
-  .maplibregl-popup-tip {
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-top-color: hsl(var(--popover));
 }
 
-:is(.geo-editor-properties-popup, .geo-editor-rotate-popup).maplibregl-popup-anchor-left
-  .maplibregl-popup-tip {
+:is(.geo-editor-properties-popup, .geo-editor-rotate-popup):is(
+    .maplibregl-popup-anchor-left,
+    .mapboxgl-popup-anchor-left
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-right-color: hsl(var(--popover));
 }
 
-:is(.geo-editor-properties-popup, .geo-editor-rotate-popup).maplibregl-popup-anchor-right
-  .maplibregl-popup-tip {
+:is(.geo-editor-properties-popup, .geo-editor-rotate-popup):is(
+    .maplibregl-popup-anchor-right,
+    .mapboxgl-popup-anchor-right
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-left-color: hsl(var(--popover));
 }
 
@@ -4157,4 +4543,205 @@ html.dark .maplibregl-popup-anchor-right:has(.vector-control-popup) .maplibregl-
 .geolibre-legend-panel.maplibregl-ctrl input::placeholder,
 .geolibre-legend-panel.maplibregl-ctrl textarea::placeholder {
   color: hsl(var(--muted-foreground)) !important;
+}
+
+/* ---------------------------------------------------------------------------
+ * Cesium's toolbar widgets on the globe (`cesium-widget-controls.ts`): the
+ * home button, the scene-mode picker, and the fullscreen button.
+ *
+ * Cesium ships them in its own dark-blue toolbar look — `#303336` on a `#444`
+ * border, a `#48b` hover with a white glow — which reads as a foreign control
+ * next to MapLibre's white buttons, and does so in both themes (GeoLibre keeps
+ * the map chrome white in dark mode too, see the graticule control above).
+ * These rules restyle the chrome to MapLibre's while leaving the widgets' own
+ * SVG icons and expand/collapse behaviour alone.
+ *
+ * Everything is scoped under `.geolibre-cesium-ctrl`, the wrapper the controls
+ * add, so Cesium's other DOM — the credit display, the render-error panel — is
+ * untouched. `29px` and the shadow are MapLibre's own control-button metrics.
+ * ------------------------------------------------------------------------- */
+.geolibre-cesium-ctrl {
+  /* MapLibre's control shadow, so the buttons sit on the map like their
+     neighbours rather than floating flat. */
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 0.1);
+  border-radius: 4px;
+}
+
+.geolibre-cesium-ctrl .cesium-button {
+  background: #fff;
+  border: none;
+  border-radius: 4px;
+  /* `fill`, not `color`: the widgets draw their icons as SVG paths. */
+  fill: #333;
+  margin: 0;
+  padding: 0;
+}
+
+/* Two selectors because the widgets do not agree on a class. The home button
+   and the scene-mode picker are `cesium-toolbar-button`s, which Cesium leaves
+   unsized for a toolbar to place; the fullscreen button is not one, and
+   FullscreenButton.css sizes it to `100%` of a parent it expects `Viewer` to
+   have given a height. Sizing every button here covers both, and the wrapper
+   `<span>` the scene-mode picker nests its button in needs it too — it is not a
+   `<button>`, so the element-qualified selector alone would miss it. */
+.geolibre-cesium-ctrl .cesium-toolbar-button,
+.geolibre-cesium-ctrl button.cesium-button {
+  width: 29px;
+  height: 29px;
+}
+
+/* The scene-mode picker nests its button inside a wrapper `<span>` that
+   SceneModePicker.css gives `margin: 0 3px`. The controls are stacked in a
+   right-aligned corner, so that padding makes the picker's wrapper 6px wider
+   than the home button's and shifts the button itself 3px left of the one above
+   it — a visible misalignment in a vertical toolbar. The buttons are spaced by
+   the `.maplibregl-ctrl` margins already; this padding is pure offset. */
+.geolibre-cesium-ctrl .cesium-sceneModePicker-wrapper {
+  margin: 0;
+}
+
+/* Hover and focus.
+ *
+ * The specificity here is load-bearing, not decoration. MapLibre's own
+ * `.maplibregl-ctrl button:not(:disabled):hover` scores higher than a plain
+ * `.geolibre-cesium-ctrl .cesium-button:hover` (an extra element selector), so
+ * it wins and replaces the white background with its `rgba(0, 0, 0, .05)`.
+ * That colour is *translucent*: on the light 2D map it reads as a faint grey,
+ * but here it lets the globe show straight through the button, which over a
+ * night-side globe or dark imagery leaves a dark icon on a near-black square.
+ * Matching MapLibre's selector shape (`button` + `:not(:disabled)`) and adding
+ * the scoping class outranks it without reaching for `!important`. */
+/* Cesium's focused icon is white; keep it legible after pointer clicks. */
+.geolibre-cesium-ctrl button.cesium-button:not(:disabled):focus {
+  background: #fff;
+  border: none;
+  box-shadow: none;
+  fill: #333;
+  outline: none;
+}
+
+.geolibre-cesium-ctrl button.cesium-button:not(:disabled):hover {
+  background: #dbeafe;
+  border: none;
+  box-shadow: inset 0 0 0 2px #60a5fa;
+  fill: #1e40af;
+}
+
+.geolibre-cesium-ctrl button.cesium-button:not(:disabled):focus-visible {
+  outline: 2px solid #0096ff;
+  outline-offset: 2px;
+}
+
+.geolibre-cesium-ctrl button.cesium-button:not(:disabled):active {
+  background: #bfdbfe;
+  box-shadow: inset 0 0 0 2px #2563eb;
+  fill: #1e3a8a;
+}
+
+/* A disabled Cesium button (the fullscreen one, where the browser forbids
+   fullscreen) keeps Cesium's dark palette otherwise. */
+.geolibre-cesium-ctrl button.cesium-button:disabled {
+  background: #fff;
+  border: none;
+  box-shadow: none;
+  fill: #b0b0b0;
+}
+
+/* Expand left into the map instead of down over the fullscreen button.
+   Keep the wrapper one button wide so opening it never shifts the toolbar.
+   Flex lays out only the visible alternatives, regardless of the selected mode. */
+.geolibre-cesium-ctrl .cesium-sceneModePicker-wrapper {
+  display: inline-flex;
+  flex-direction: row-reverse;
+  gap: 6px;
+}
+
+.geolibre-cesium-ctrl .cesium-sceneModePicker-wrapper .cesium-button {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.geolibre-cesium-ctrl .cesium-sceneModePicker-dropDown-icon {
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 0.1);
+}
+
+.geolibre-cesium-ctrl-expands {
+  position: relative;
+  z-index: 1;
+}
+
+.geolibre-cesium-ctrl .cesium-sceneModePicker-hidden {
+  display: none;
+}
+
+/* The native basemap gallery opens beside the Cesium toolbar and stays inside
+   the map, including short split panes and fullscreen layouts. */
+.geolibre-cesium-basemap-picker {
+  position: relative;
+  z-index: 3;
+}
+
+.geolibre-cesium-basemap-picker button.cesium-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.geolibre-cesium-basemap-picker .cesium-baseLayerPicker-dropDown {
+  top: 0;
+  right: 39px;
+  margin-top: 0;
+  width: min(320px, calc(100vw - 90px));
+  max-height: min(500px, var(--cesium-picker-height, 60vh));
+  background: hsl(var(--popover) / 0.97);
+  font-family: var(--font-sans);
+  line-height: 1.35;
+  color: hsl(var(--popover-foreground));
+  border-color: hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.2);
+}
+
+.geolibre-cesium-basemap-picker .cesium-baseLayerPicker-sectionTitle,
+.geolibre-cesium-basemap-picker .cesium-baseLayerPicker-categoryTitle,
+.geolibre-cesium-basemap-picker .cesium-baseLayerPicker-itemLabel {
+  color: inherit;
+  font-family: inherit;
+}
+
+.geolibre-cesium-basemap-picker .cesium-baseLayerPicker-choices {
+  border-color: hsl(var(--border));
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+}
+
+.geolibre-cesium-basemap-picker .cesium-baseLayerPicker-item {
+  width: 100%;
+  margin: 0;
+}
+
+.geolibre-cesium-basemap-picker
+  .cesium-baseLayerPicker-selectedItem
+  .cesium-baseLayerPicker-itemIcon {
+  border-color: hsl(var(--primary));
+}
+
+.geolibre-cesium-basemap-picker .cesium-baseLayerPicker-item:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.geolibre-cesium-basemap-picker .cesium-baseLayerPicker-itemIcon {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+.geolibre-cesium-basemap-picker
+  .cesium-baseLayerPicker-selectedItem
+  .cesium-baseLayerPicker-itemLabel {
+  color: hsl(var(--primary));
+  font-weight: 600;
 }

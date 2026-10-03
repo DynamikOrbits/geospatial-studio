@@ -87,19 +87,19 @@
     },
     {
       "path": "apps/geolibre-desktop/src/App.tsx",
-      "reason": "workspace-embed: mount the host postMessage bridge at the application root so a restoring startup project cannot hide the iframe from Workspace."
+      "reason": "workspace-embed: mount the host postMessage bridge at the application root, fed by the shell's map-ready generation, so a restoring startup project cannot hide the iframe from Workspace."
     },
     {
       "path": "apps/geolibre-desktop/src/main.tsx",
-      "reason": "workspace-embed: install the Dynamik Workspace app bridge before React mounts so discovery and theme handshake work in a framed tab."
+      "reason": "workspace-embed: install the Dynamik Workspace app bridge before React mounts so discovery and theme handshake work in a framed tab; skip service-worker registration when embedded (the isolated embed origin answers 410 for /sw.js)."
     },
     {
       "path": "apps/geolibre-desktop/src/components/layout/DesktopShell.tsx",
-      "reason": "workspace-embed: share a module-scoped map controller ref with App so the embed transport survives DesktopShell unmount during startup guards."
+      "reason": "workspace-embed: lend the shell's engine ref and map-ready generation to the App-level embed transport (useAppMapEngineBridge in src/lib/map-controller-ref.ts) instead of mounting useEmbedApi here, so the bridge survives DesktopShell being gated during startup."
     },
     {
       "path": "apps/geolibre-desktop/src/hooks/useEmbedApi.ts",
-      "reason": "workspace-embed: expose the bridge before map readiness, wait for pending camera updates, and add captureViewport for Workspace screenshots; keep upstream capability gates."
+      "reason": "workspace-embed: `ready` announces the transport before the map exists; the transport survives engine hand-offs (mapReadyGeneration re-arms only the camera listeners); addLayer.fit queues a MapEngine fit that exportImage/captureViewport wait for; captureViewport composites the full UI over the engine's render surface. Upstream capability gates kept."
     },
     {
       "path": "apps/geolibre-desktop/src/lib/embed-api.ts",
@@ -118,6 +118,10 @@
       "reason": "workspace-embed: shouldUseLastBasemapPersistence(embedded) isolates ephemeral embeds from host-wide basemap prefs."
     },
     {
+      "path": "apps/geolibre-desktop/src/hooks/useLastRendererPersistence.ts",
+      "reason": "workspace-embed: embedded views neither restore nor write the last rendering engine, matching the last-basemap isolation. Covered by e2e/embed-api.spec.ts."
+    },
+    {
       "path": "apps/geolibre-desktop/src/hooks/useThemeMode.ts",
       "reason": "workspace-embed: accept dynamik-workspace-theme events and refuse local theme toggles while framed by Workspace."
     },
@@ -126,16 +130,16 @@
       "reason": "workspace-embed: skip applying the desktop theme scheme while documentElement.dataset.dynamikWorkspace is set."
     },
     {
-      "path": "apps/geolibre-desktop/src/lib/print-layout-export.ts",
-      "reason": "workspace-embed: export MapLike so workspace-viewport-capture can reuse the print-layout screenshot path."
-    },
-    {
       "path": "packages/map/src/generated-images.ts",
       "reason": "workspace-embed: await generated sprite registration so Workspace viewport capture does not race missing marker images."
     },
     {
+      "path": "packages/map/src/MapCanvas.tsx",
+      "reason": "fix: do not publish the camera on the map's `load` event while an animation is in flight — the applyView echo's jumpTo cancels it. The 2D default makes the basemap style land mid-flight routinely, cutting short Set View and Workspace addLayer.fit (upstream's globe default mostly hides the race)."
+    },
+    {
       "path": "playwright.config.ts",
-      "reason": "workspace-embed: GEOLIBRE_E2E_PORT so embed e2e can share a port with the Workspace host without colliding."
+      "reason": "workspace-embed: GEOLIBRE_E2E_PORT so embed e2e can share a port with the Workspace host without colliding; the fork's own specs (embed-api, help-menu) join CORE_SPECS so they gate PRs instead of running only in the nightly features suite."
     },
     {
       "path": "tests/embed-api.test.ts",
@@ -148,6 +152,10 @@
     {
       "path": "tests/marker-categories.test.ts",
       "reason": "workspace-embed: assert generated sprites resolve missing style images before MapLibre warns, for capture fidelity."
+    },
+    {
+      "path": "tests/fixtures/layer-sync-call-log.json",
+      "reason": "workspace-embed: the golden call log records generated-images.ts's missing-image resolver (setMissingStyleImageResolver) where upstream records the styleimagemissing listener — one line per scenario, render path otherwise identical. On a sync conflict, regenerate with UPDATE_CALL_LOGS=1 and oxfmt as the test's header describes."
     },
     {
       "path": "tests/cesium-imagery.test.ts",

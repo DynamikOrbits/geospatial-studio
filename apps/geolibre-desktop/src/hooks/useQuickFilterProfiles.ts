@@ -1,12 +1,16 @@
 import type { GeoLibreLayer } from "@geolibre/core";
-import type { MapController } from "@geolibre/map";
+import type { MapEngine } from "@geolibre/map";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { getColumnSettings } from "../lib/attribute-columns";
 import {
   profileQuickFilterFields,
   type QuickFilterFieldProfile,
 } from "../lib/quick-filter-profile";
-import { isVectorTileLayer, loadedVectorTileFeatures } from "./useVectorTileGeometryBackfill";
+import {
+  isVectorTileLayer,
+  loadedVectorTileFeatures,
+  vectorTileMap,
+} from "./useVectorTileGeometryBackfill";
 
 /**
  * Field profiles backing a layer's quick filters, from whichever features the
@@ -53,7 +57,7 @@ const EMPTY_PROFILES: QuickFilterProfiles = {
  */
 export function useQuickFilterProfiles(
   layer: GeoLibreLayer | null | undefined,
-  mapControllerRef: RefObject<MapController | null>,
+  mapControllerRef: RefObject<MapEngine | null>,
   mapReadyGeneration = 0,
 ): QuickFilterProfiles {
   const features = layer?.geojson?.features;
@@ -80,13 +84,14 @@ export function useQuickFilterProfiles(
     tileSignature.current = "";
     setTileRecords([]);
     if (!tileBacked || !layerId) return;
-    const map = mapControllerRef.current?.getMap();
+    const engine = mapControllerRef.current;
+    const map = vectorTileMap(engine);
     if (!map) return;
 
     const sample = (): void => {
       const current = layerRef.current;
       if (!current) return;
-      const sampled = loadedVectorTileFeatures(map, current);
+      const sampled = loadedVectorTileFeatures(map, current, engine?.kind);
       const records = sampled.map((feature) => feature.properties ?? {});
       const signature = `${records.length}:${[
         ...new Set(records.flatMap((record) => Object.keys(record))),

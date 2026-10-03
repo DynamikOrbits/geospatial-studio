@@ -1,4 +1,5 @@
-import { captureMapImage, type MapLike } from "./print-layout-export";
+import type { MapRenderSurface } from "@geolibre/map";
+import { captureMapImage } from "./print-layout-export";
 
 export const MAX_WORKSPACE_CAPTURE_DIMENSION = 4096;
 const CAPTURE_NODE_ATTRIBUTE = "data-geolibre-capture-node";
@@ -76,11 +77,12 @@ function freezeComputedCaptureStyles(sourceElements: Element[], clonedRoot: HTML
  * product contract remains a map-only PNG.
  *
  * html2canvas-pro rasterizes the application chrome (toolbars, layer browser,
- * dialogs and controls). The live MapLibre/deck.gl canvases are composited a
- * second time from the map's preserved drawing buffer so WebGL content cannot
- * silently disappear from an otherwise valid screenshot.
+ * dialogs and controls). The live map canvases (MapLibre/deck.gl, or whichever
+ * engine owns the render surface) are composited a second time from the
+ * preserved drawing buffer so WebGL content cannot silently disappear from an
+ * otherwise valid screenshot.
  */
-export async function captureWorkspaceViewportImage(map: MapLike): Promise<string> {
+export async function captureWorkspaceViewportImage(map: MapRenderSurface): Promise<string> {
   const root = document.getElementById("root");
   if (!root || !root.isConnected) {
     throw new Error("The GeoLibre application root is not available for capture");

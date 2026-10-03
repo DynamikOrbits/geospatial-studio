@@ -190,6 +190,43 @@ describe("Time Slider selector display-unit restoration", () => {
   });
 });
 
+describe("Time Slider KML frame granularity", () => {
+  it("offers the hour unit for sub-day KML frames on a year/month/day track", () => {
+    const store = useAppStore.getState();
+    const previousLayers = store.layers;
+    const frame = (id: string, begin: number): GeoLibreLayer => ({
+      id,
+      name: id,
+      type: "geojson",
+      source: { type: "geojson" },
+      visible: true,
+      opacity: 1,
+      style: { ...DEFAULT_LAYER_STYLE },
+      metadata: { timeSpan: { begin, end: begin + 3_600_000 } },
+    });
+    const ranges: unknown[][] = [];
+    const granularities: string[][] = [];
+    const control = {
+      getConfig: () => baseConfig({ granularities: ["year", "month", "day"] }),
+      setRange: (...args: unknown[]) => ranges.push(args),
+      setGranularities: (units: string[]) => granularities.push(units),
+    } as unknown as TimeSliderControl;
+
+    try {
+      useAppStore.setState({
+        layers: [frame("t0", Date.UTC(2024, 0, 1)), frame("t1", Date.UTC(2024, 0, 1, 1))],
+      });
+      __reconcileBoundLayersForTests(control);
+      assert.equal(ranges.at(-1)?.[3], "hour");
+      assert.deepEqual(granularities.at(-1), ["hour", "year", "month", "day"]);
+    } finally {
+      useAppStore.setState({ layers: previousLayers });
+      // Reset the module's captured pre-binding range for later tests.
+      __reconcileBoundLayersForTests(control);
+    }
+  });
+});
+
 describe("Time Slider mosaic source persistence", () => {
   const mosaicSource = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
     type: "mosaic",
@@ -302,6 +339,31 @@ describe("Time Slider store layer identify metadata", () => {
     } as SourceSpec);
     assert.equal(layer.metadata.identifiable, true);
     assert.equal(layer.metadata.pixelIdentify, true);
+  });
+
+  it("keeps the hosted mosaic template on its store mirror for share readiness", () => {
+    const url =
+      "https://huggingface.co/datasets/giswqs/PACE-Water-Quality/resolve/main/json/{date:YYYYMMDD}_acdom.json";
+    const layer = createStoreLayer({
+      type: "mosaic",
+      id: "acdom",
+      name: "aCDOM440",
+      url,
+    } as SourceSpec);
+
+    assert.equal(layer.source.sourceId, "acdom");
+    assert.equal(layer.metadata.originalUrl, url);
+  });
+
+  it("uses the first non-empty authored URL", () => {
+    const layer = createStoreLayer({
+      type: "xyz",
+      id: "tiles",
+      url: "",
+      tiles: "https://example.com/{z}/{x}/{y}.png",
+    } as unknown as SourceSpec);
+
+    assert.equal(layer.metadata.originalUrl, "https://example.com/{z}/{x}/{y}.png");
   });
 
   it("leaves pre-rendered tile sources unidentifiable", () => {

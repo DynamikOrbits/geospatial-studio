@@ -54,10 +54,14 @@ m.add_ee_layer(ee_object, vis_params=None, name="Earth Engine", shown=True,
                opacity=1.0)
 m.add_pmtiles(url, name, tile_type="vector", source_layers=None)
 m.add_vector_tiles(url, name, source_layers=None)
-m.add_wms(endpoint, layers, name, version="1.1.1")
-m.add_wmts(endpoint, name)
+m.add_wms(endpoint, layers, name, version="1.1.1", crs=None, bounds=None)
+# crs: EPSG:3857 by default; for a server without it, EPSG:4326/4258/6706, or
+# CRS:84 with version="1.3.0"; drawn only by the desktop app (blank on the web)
+m.add_wmts(endpoint, name, bounds=None)
 m.add_wfs(endpoint, type_name, max_features=1000)
-m.add_3d_tiles(url, name, altitude_offset=0)
+m.add_3d_tiles(url, name, altitude_offset=0)          # or ion_asset_id=96188 (3D globe only)
+m.add_cesium_ion(asset_id, name, kind="3d-tiles")     # kind="imagery" for an imagery asset
+m.add_czml(url, name)                                  # or data=[...packets] (3D globe only)
 m.add_video(...)
 ```
 
@@ -85,9 +89,66 @@ m.add_marker(-122.4, 37.8, properties={"name": "San Francisco"})
 m.add_markers(points)
 m.add_circle_markers(points)
 m.add_marker_cluster(points, cluster_radius=50, cluster_max_zoom=14)
-m.add_heatmap(points, radius=35, intensity=1)
+m.add_heatmap(points, radius=35, intensity=1, color_ramp="turbo", weight_field="value")
 m.add_polyline(...)
 ```
+
+Marker symbology is named arguments on `add_marker`/`add_markers`: `color`,
+`opacity`, `radius`, `stroke_color`, `stroke_width` for the default circle, and
+`shape` (`circle`, `square`, `triangle`, `diamond`, `star`, `cross`, `pin`,
+`custom`), `size`, `icon` (SVG markup) to switch to a marker sprite. A sprite is
+sized by `size`, its `color` must be a hex color, and it draws its own white
+halo — so the circle-only arguments (`opacity`, `radius`, `stroke_color`,
+`stroke_width`) are rejected rather than silently ignored. A raw style key
+passed alongside a named argument wins.
+
+### Popups and tooltips
+
+Every `add_*` that takes style overrides accepts `popup=` and `tooltip=`
+(`add_ee_layer` does not). To change a layer's popup after it was added, use
+`m.set_popup(...)` / `m.set_tooltip(...)` / `m.clear_popup(...)`. Without a config a
+layer shows its name plus every visible property on click, and no hover tip.
+Click popups open only while Identify is armed: `m.set_identify()` arms it on
+every visible layer, `m.set_identify("Sites")` on one, `m.set_identify(None)`
+turns it off. Hover tips pause while it is armed. `m.show_control("bookmark")`,
+`m.show_control("search")` and `m.hide_control("globe")` toggle panels and map
+controls, and `m.set_projection("mercator")` draws a flat map instead of a globe.
+
+```python
+m.add_markers(
+    points,
+    popup=[
+        {"field": "name", "label": "Site"},
+        {"field": "photo", "kind": "image"},          # http(s) URL → thumbnail
+        {"field": "url", "kind": "link", "link_label": "Details"},
+        {"field": "pop", "kind": "number", "thousands": True, "suffix": " people"},
+    ],
+    tooltip="name",                                    # hover tip
+)
+m.set_popup(layer, ["name"], title="name", body_expression='["get", "blurb"]')
+m.set_popup(layer, click=False)                        # no popup on click
+```
+
+A field `kind` is `auto`, `text`, `number`, `date`, `link`, or `image`. Raw HTML
+in a property is **not** rendered as markup, and neither is Markdown (an
+untrusted GeoJSON must not be able to inject it); use `kind="image"`/`"link"`
+for pictures and links, or `body_expression` for composed text.
+
+`popup_max_width=` (288-1200) and `popup_image_height=` (40-1200), both in CSS
+pixels, size the click popup and the pictures inside it. They work as top-level
+arguments on any `add_*`, as `max_width`/`image_height` inside a `popup=`
+mapping, and as arguments to `set_popup`. A thumbnail keeps its aspect ratio,
+so raise the width alongside the height for a landscape photo:
+
+```python
+m.add_markers(points, popup=["name", "photo"], popup_max_width=640, popup_image_height=420)
+m.set_popup(layer, max_width=640, image_height=420, merge=True)
+```
+
+The tooltip and the click popup share one field list, and the click popup only
+falls back to "all properties" while that list is empty — so `tooltip="name"`
+on its own narrows the click popup to `name`. Pass `popup=` with the fields you
+want on click whenever you pass `tooltip=`.
 
 ### In-memory xarray rasters
 
@@ -164,8 +225,9 @@ m.describe()
 
 A `Layer` object mirrors the same operations as attributes:
 `layer.name`, `layer.visible`, `layer.opacity`, `layer.style`,
-`layer.set_style(...)`, `layer.get_features()`, `layer.zoom_to()`,
-`layer.move(i)`, `layer.duplicate()`, `layer.remove()`.
+`layer.set_style(...)`, `layer.popup`, `layer.set_popup(...)`,
+`layer.set_tooltip(...)`, `layer.clear_popup()`, `layer.get_features()`,
+`layer.zoom_to()`, `layer.move(i)`, `layer.duplicate()`, `layer.remove()`.
 
 ## Map controls
 
@@ -212,3 +274,23 @@ as a validator for a project you wrote by hand.
 - **MCP**: `geolibre.authoring` is the widget-free module both `Map` and the MCP
   tools delegate to. Import it directly if you want project operations without
   constructing a `Map`.
+
+## Cesium and mixed pane layouts
+
+```python
+m = Map(renderer="cesium", center=(-100, 40), zoom=4)
+m.set_map_layout(1, 2, view_kinds=["cesium", "maplibre"], sync_view=True)
+pane_id = m.project["secondaryMapViews"][0]["id"]
+m.set_renderer("cesium", pane_id=pane_id)
+assert m.get_renderer() == "cesium"
+```
+
+Renderer choices are `"maplibre"`, `"cesium"`, `"mapbox"` and `"arcgis"` (Mapbox needs a
+Mapbox access token in the app's Settings; see `docs/mapbox-renderer.md`. ArcGIS
+loads the ArcGIS Maps SDK for JavaScript from Esri's CDN and takes an optional
+ArcGIS API key for Esri basemap styles; see `docs/arcgis-renderer.md`). Omitting `pane_id` targets the
+primary map. Grid dimensions are 1–4; `view_kinds` contains one renderer per
+pane, primary first. Existing pane IDs, cameras, and visibility overrides survive
+layout resizing. Save the project normally to preserve `primaryRenderer` and
+each secondary pane's `viewKind`. `DashMap(renderer="cesium")` selects the same
+initial renderer; Dash callbacks can update these fields through `project`.

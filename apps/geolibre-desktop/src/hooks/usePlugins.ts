@@ -2,11 +2,13 @@ import {
   clearExternalNativePaintBridge,
   setExternalNativePaintBridge,
   useAppStore,
+  type AppState,
 } from "@geolibre/core";
 import { buildProjectEgressSnapshot } from "../lib/build-project-snapshot";
 import { nativeWmsTileUrl } from "../lib/native-wms-url";
 import {
   addRasterToMap,
+  readRasterWindow,
   setRasterRenderEngine,
   addZarrRasterLayer,
   buildSelectorTimeBinding,
@@ -19,6 +21,7 @@ import {
   setZarrLayerSelector,
   setZarrLocalStoreProvider,
   maplibreAnnotationsPlugin,
+  maplibreDimensionsPlugin,
   maplibreBasemapControlPlugin,
   maplibreComponentsPlugin,
   maplibreDeckGlVizPlugin,
@@ -30,6 +33,8 @@ import {
   type EffectsSettings,
   maplibreEarthdataGisPlugin,
   setEarthdataCogSaver,
+  setSatelliteEmbeddingsFileSaver,
+  setFieldsOfTheWorldFileSaver,
   maplibreEnviroAtlasPlugin,
   maplibreEsriWaybackPlugin,
   maplibreFemaWmsPlugin,
@@ -39,6 +44,8 @@ import {
   maplibreNasaEarthdataPlugin,
   maplibreNationalMapPlugin,
   maplibreOpenAerialMapPlugin,
+  maplibreOsmDownloaderPlugin,
+  maplibreIgnLidarHdPlugin,
   maplibreArcGisHubPlugin,
   maplibreCkanPlugin,
   maplibreSocrataPlugin,
@@ -46,9 +53,13 @@ import {
   maplibreSourceCoopPlugin,
   maplibreNaturalEarthPlugin,
   maplibreHuggingFacePlugin,
+  maplibreSatelliteEmbeddingsPlugin,
+  maplibreFieldsOfTheWorldPlugin,
   maplibreGeoLensPlugin,
+  setGeoLensDefaultServerUrl,
   maplibreVantorPlugin,
   maplibrePlanetOpenDataPlugin,
+  maplibrePortolanPlugin,
   maplibreOvertureMapsPlugin,
   queryOvertureFeatures,
   maplibreGraticulePlugin,
@@ -69,12 +80,14 @@ import {
   maplibreSunPlugin,
   maplibreRouteAnimationPlugin,
   flightSimulatorPlugin,
+  godsEyeViewPlugin,
   maplibreSwipePlugin,
   SWIPE_PLUGIN_ID,
   maplibreTimelapsePlugin,
   maplibreTimeSliderPlugin,
   setTimelapseVideoSaver,
   maplibreUsgsLidarPlugin,
+  maplibreUsgsNldiPlugin,
   PluginManager,
   registerRightPanel,
   unregisterRightPanel,
@@ -84,6 +97,9 @@ import {
   getActiveRightPanel,
   setActiveRightPanelDock,
   getActiveRightPanelDock,
+  registerAssistantTool,
+  registerAssistantToolSpec,
+  registerAssistantGuidance,
   registerToolbarMenu,
   unregisterToolbarMenu,
   registerFloatingPanel,
@@ -92,7 +108,8 @@ import {
   closeFloatingPanel,
   getOpenFloatingPanels,
 } from "@geolibre/plugins";
-import type { MapController } from "@geolibre/map";
+import { readDeploymentEnvValue } from "../lib/deployment-env";
+import { CesiumEngine, getPrimaryCesiumControlHost, type MapEngine } from "@geolibre/map";
 import type {
   GeoLibreCogLayerOptions,
   GeoLibreCogRenderEngine,
@@ -106,6 +123,7 @@ import type {
   GeoLibreZarrQueryGeometry,
   GeoLibreZarrQueryOptions,
   GeoLibreZarrQuerySelector,
+  GeoLibreRasterWindowOptions,
 } from "@geolibre/plugins";
 import { cogEngineDefaults } from "../lib/cog-render-engine";
 import { invoke } from "@tauri-apps/api/core";
@@ -141,6 +159,7 @@ import { createPluginLocaleApi } from "../lib/plugin-locale";
 import { setTimeSliderOpenedByBinding, shouldCloseTimeSliderDock } from "../lib/time-slider-dock";
 import { createWmsTileUrl, normalizeWmsVersion } from "../components/layout/add-data/helpers";
 import { createExternalNativeStoreLayer } from "../lib/external-native-layer";
+import { createPluginLayerGroupActions } from "../lib/plugin-layer-groups";
 import { createPluginLayerQueries } from "../lib/plugin-layer-queries";
 import { mergeStringLists } from "../lib/string-lists";
 import {
@@ -186,10 +205,12 @@ interface TauriRuntimeWindow extends Window {
 }
 
 const manager = new PluginManager();
+setGeoLensDefaultServerUrl(readDeploymentEnvValue("VITE_GEOLENS_DEFAULT_URL"));
 manager.registerAll([
   maplibreLayerControlPlugin,
   maplibreGeoEditorPlugin,
   maplibreAnnotationsPlugin,
+  maplibreDimensionsPlugin,
   maplibreBasemapControlPlugin,
   // The web service plugins (WEB_SERVICE_PLUGIN_IDS) are grouped into the
   // "Web Services" submenu, rendered where the first of them appears in this
@@ -198,10 +219,14 @@ manager.registerAll([
   maplibreNasaEarthdataPlugin,
   maplibreEnviroAtlasPlugin,
   maplibreNationalMapPlugin,
+  maplibreUsgsNldiPlugin,
   maplibreVantorPlugin,
   maplibrePlanetOpenDataPlugin,
+  maplibrePortolanPlugin,
   maplibreEarthdataGisPlugin,
   maplibreOpenAerialMapPlugin,
+  maplibreOsmDownloaderPlugin,
+  maplibreIgnLidarHdPlugin,
   maplibreArcGisHubPlugin,
   maplibreSocrataPlugin,
   maplibreCkanPlugin,
@@ -209,6 +234,8 @@ manager.registerAll([
   maplibreSourceCoopPlugin,
   maplibreNaturalEarthPlugin,
   maplibreHuggingFacePlugin,
+  maplibreSatelliteEmbeddingsPlugin,
+  maplibreFieldsOfTheWorldPlugin,
   maplibreGeoLensPlugin,
   maplibreEsriWaybackPlugin,
   maplibreTimeSliderPlugin,
@@ -237,6 +264,7 @@ manager.registerAll([
   maplibreSunPlugin,
   maplibreRouteAnimationPlugin,
   flightSimulatorPlugin,
+  godsEyeViewPlugin,
   // Last visible entry of the Plugins menu; the ids below are skipped by
   // PluginsMenu and surface elsewhere.
   maplibreSamGeoPlugin,
@@ -276,11 +304,38 @@ setEarthdataCogSaver(async (geoTiffBytes, defaultName) => {
   const saved = await saveBinaryFileWithFallback(cogBytes, {
     defaultName,
     filters: [{ name: "Cloud Optimized GeoTIFF", extensions: ["tif"] }],
-    browserTypes: [{ description: "Cloud Optimized GeoTIFF", accept: { "image/tiff": [".tif"] } }],
+    browserTypes: [
+      {
+        description: "Cloud Optimized GeoTIFF",
+        accept: { "image/tiff": [".tif"] },
+      },
+    ],
     mimeType: "image/tiff",
   });
   return saved !== null;
 });
+
+// The Satellite Embeddings plugin builds clipped GeoTIFFs in memory; saving
+// them needs the app's file dialogs, injected the same way.
+setSatelliteEmbeddingsFileSaver((blob, { defaultName, extension, mimeType, description }) =>
+  saveBinaryFileWithFallback(blob, {
+    defaultName,
+    filters: [{ name: description, extensions: [extension] }],
+    browserTypes: [{ description, accept: { [mimeType]: [`.${extension}`] } }],
+    mimeType,
+  }),
+);
+
+// The Fields of the World plugin saves tile GeoParquet and GeoJSON files the
+// same way.
+setFieldsOfTheWorldFileSaver((blob, { defaultName, extension, mimeType, description }) =>
+  saveBinaryFileWithFallback(blob, {
+    defaultName,
+    filters: [{ name: description, extensions: [extension] }],
+    browserTypes: [{ description, accept: { [mimeType]: [`.${extension}`] } }],
+    mimeType,
+  }),
+);
 
 // The Zarr panel can open a store from a folder on disk, but reading a folder
 // needs a filesystem API the plugins package does not have, so the picker is
@@ -329,7 +384,7 @@ export function subscribeToExternalPluginLoads(listener: () => void): () => void
 // action.
 export async function upgradeExternalPlugin(
   manifestUrl: string,
-  mapControllerRef: RefObject<MapController | null>,
+  mapControllerRef: RefObject<MapEngine | null>,
 ): Promise<void> {
   await reloadExternalUrlPlugin(manager, manifestUrl, createAppAPI(mapControllerRef));
 }
@@ -343,7 +398,7 @@ export async function upgradeExternalPlugin(
 // plugin id.
 export async function installPluginArchive(
   sourcePath: string,
-  mapControllerRef: RefObject<MapController | null>,
+  mapControllerRef: RefObject<MapEngine | null>,
 ): Promise<string> {
   if (!isTauriRuntime()) {
     throw new Error("Installing plugin archives requires the desktop app.");
@@ -370,7 +425,7 @@ export async function installPluginArchive(
 export async function installPluginArchiveFromFile(
   fileName: string,
   bytes: Uint8Array,
-  mapControllerRef: RefObject<MapController | null>,
+  mapControllerRef: RefObject<MapEngine | null>,
 ): Promise<string> {
   return installWebPluginArchive(manager, fileName, bytes, createAppAPI(mapControllerRef));
 }
@@ -378,7 +433,7 @@ export async function installPluginArchiveFromFile(
 // Uninstall a plugin that was installed from a file in the browser.
 export async function uninstallPluginArchiveFromFile(
   pluginId: string,
-  mapControllerRef: RefObject<MapController | null>,
+  mapControllerRef: RefObject<MapEngine | null>,
 ): Promise<void> {
   await uninstallWebPlugin(manager, pluginId, createAppAPI(mapControllerRef));
 }
@@ -490,9 +545,7 @@ export function usePluginRegistry() {
 // Built-in plugins are registered at module load so the toolbar can render
 // plugin menu items on the first pass. This hook additionally kicks off the
 // external plugin scan and reports whether it has finished.
-export function useExternalPluginsReady(
-  mapControllerRef: RefObject<MapController | null>,
-): boolean {
+export function useExternalPluginsReady(mapControllerRef: RefObject<MapEngine | null>): boolean {
   const desktopSettings = useDesktopSettingsStore((state) => state.desktopSettings);
 
   useEffect(() => {
@@ -597,9 +650,7 @@ export function useProjectPluginTrust(): ProjectPluginTrustState {
  * Mounted once near the app root so it covers every way into split view — the
  * View menu, loading a project, or a plugin — not just the toolbar item.
  */
-export function useSwipeSplitViewExclusivity(
-  mapControllerRef: RefObject<MapController | null>,
-): void {
+export function useSwipeSplitViewExclusivity(mapControllerRef: RefObject<MapEngine | null>): void {
   const paneCount = useAppStore((state) => state.mapLayout.rows * state.mapLayout.cols);
 
   useEffect(() => {
@@ -749,7 +800,7 @@ function ensureExternalPluginsLoadedWithSettings(
 export function bindTemporalLayer(
   layerId: string,
   adapter: TemporalLayerAdapter,
-  mapControllerRef?: RefObject<MapController | null>,
+  mapControllerRef?: RefObject<MapEngine | null>,
 ): boolean {
   const binding = buildSelectorTimeBinding(adapter.dimension ?? "time", adapter.getTimeValues(), {
     granularity: adapter.granularity,
@@ -785,9 +836,7 @@ export function bindTemporalLayer(
  *
  * @param mapControllerRef - Used to build the app API for activation.
  */
-export function activateTimeSliderForBinding(
-  mapControllerRef?: RefObject<MapController | null>,
-): void {
+export function activateTimeSliderForBinding(mapControllerRef?: RefObject<MapEngine | null>): void {
   if (manager.isActive(TIME_SLIDER_PLUGIN_ID)) return;
   const before = JSON.stringify(projectPluginStateSnapshot());
   try {
@@ -821,7 +870,7 @@ export function activateTimeSliderForBinding(
  * Mounted once near the app root so it covers every way a binding can
  * disappear, not just the Layers panel.
  */
-export function useTimeSliderAutoClose(mapControllerRef: RefObject<MapController | null>): void {
+export function useTimeSliderAutoClose(mapControllerRef: RefObject<MapEngine | null>): void {
   useEffect(() => {
     // Subscribed rather than selected from the store so no component re-renders
     // on every layer edit just to run this check.
@@ -846,13 +895,39 @@ export function useTimeSliderAutoClose(mapControllerRef: RefObject<MapController
   }, [mapControllerRef]);
 }
 
-export function createAppAPI(mapControllerRef?: RefObject<MapController | null>) {
+/**
+ * The basemap a plugin sees as active: the Mapbox-only style while Mapbox is
+ * the primary renderer, otherwise the shared MapLibre/Cesium basemap.
+ *
+ * `setBasemap` writes the same two fields, so `getActiveBasemap` and
+ * `onBasemapChange` must read them through this one helper or a Mapbox style
+ * change is written but never reported to `onBasemapChange` subscribers.
+ */
+function effectiveBasemapUrl(
+  state: Pick<AppState, "primaryRenderer" | "preferences" | "basemapStyleUrl">,
+): string {
+  return state.primaryRenderer === "mapbox"
+    ? (state.preferences.map.mapboxStyleUrl ?? state.basemapStyleUrl)
+    : state.basemapStyleUrl;
+}
+
+export function createAppAPI(mapControllerRef?: RefObject<MapEngine | null>) {
   const store = useAppStore.getState();
   // Captured so methods that delegate to plugin helpers taking the AppAPI
   // itself (e.g. addCogLayer -> addRasterToMap) can pass `api`. Only read
   // when those methods are called, which is always after assignment.
   const api = {
-    setBasemap: (url: string) => store.setBasemapStyleUrl(url),
+    setBasemap: (url: string) => {
+      const state = useAppStore.getState();
+      if (state.primaryRenderer === "mapbox") {
+        state.setPreferences({
+          ...state.preferences,
+          map: { ...state.preferences.map, mapboxStyleUrl: url },
+        });
+      } else {
+        state.setBasemapStyleUrl(url);
+      }
+    },
     addGeoJsonLayer: (name: string, data: GeoJSON.FeatureCollection, sourcePath?: string) => {
       const id = store.addGeoJsonLayer(name, data, sourcePath);
       return id;
@@ -960,6 +1035,7 @@ export function createAppAPI(mapControllerRef?: RefObject<MapController | null>)
           ...(options?.opacity !== undefined ? { opacity: options.opacity } : {}),
         },
         ...(options?.beforeLayerId ? { beforeId: options.beforeLayerId } : {}),
+        ...(options?.zoomTo !== undefined ? { zoomTo: options.zoomTo } : {}),
       });
     },
     setCogRenderEngine: (engine: GeoLibreCogRenderEngine) => setRasterRenderEngine(api, engine),
@@ -1010,11 +1086,24 @@ export function createAppAPI(mapControllerRef?: RefObject<MapController | null>)
       return detach;
     },
     unregisterTemporalLayer: (layerId: string) => unregisterTemporalLayer(layerId),
-    getActiveBasemap: () => useAppStore.getState().basemapStyleUrl,
+    getActiveBasemap: () => effectiveBasemapUrl(useAppStore.getState()),
+    getBasemapLayerIds: () => mapControllerRef?.current?.getBasemapStyleLayerIds() ?? [],
     onBasemapChange: (callback: (styleUrl: string) => void) =>
       useAppStore.subscribe((state, prev) => {
-        if (state.basemapStyleUrl !== prev.basemapStyleUrl) {
-          callback(state.basemapStyleUrl);
+        const current = effectiveBasemapUrl(state);
+        if (current !== effectiveBasemapUrl(prev)) {
+          callback(current);
+        }
+      }),
+    getLayers: () => useAppStore.getState().layers.map((layer) => layer.id),
+    onLayersChanged: (callback: (layerIds: string[]) => void) =>
+      useAppStore.subscribe((state, prev) => {
+        const layerIds = state.layers.map((layer) => layer.id);
+        if (
+          layerIds.length !== prev.layers.length ||
+          layerIds.some((id, index) => id !== prev.layers[index]?.id)
+        ) {
+          callback(layerIds);
         }
       }),
     fetchArrayBuffer: fetchRemoteArrayBuffer,
@@ -1042,12 +1131,50 @@ export function createAppAPI(mapControllerRef?: RefObject<MapController | null>)
       return !manager.isActive(pluginId);
     },
     queryOvertureFeatures,
-    addLayerGroup: (name?: string, layerIds?: string[]) =>
-      useAppStore.getState().addLayerGroup(name, layerIds),
-    removeLayerGroup: (id: string) => useAppStore.getState().removeLayerGroup(id),
+    ...createPluginLayerGroupActions(),
     fitBounds: (bounds: [number, number, number, number]) =>
       mapControllerRef?.current?.fitBounds(bounds),
+    getViewBounds: () => mapControllerRef?.current?.getViewBounds() ?? null,
     getMap: () => mapControllerRef?.current?.getMap() ?? null,
+    readRasterWindow: (layerId: string, options: GeoLibreRasterWindowOptions) =>
+      readRasterWindow(layerId, options),
+    getMapRenderer: () => useAppStore.getState().primaryRenderer,
+    getArcgisView: () => {
+      const engine = mapControllerRef?.current;
+      return engine?.kind === "arcgis" &&
+        "getView" in engine &&
+        typeof engine.getView === "function"
+        ? engine.getView()
+        : null;
+    },
+    getMapboxMap: () => {
+      const engine = mapControllerRef?.current;
+      return engine?.kind === "mapbox" &&
+        "getMapboxMap" in engine &&
+        typeof engine.getMapboxMap === "function"
+        ? engine.getMapboxMap()
+        : null;
+    },
+    getMapboxGl: () => {
+      const engine = mapControllerRef?.current;
+      return engine?.kind === "mapbox" &&
+        "getMapboxGl" in engine &&
+        typeof engine.getMapboxGl === "function"
+        ? engine.getMapboxGl()
+        : null;
+    },
+    getMapboxAccessToken: () => {
+      const engine = mapControllerRef?.current;
+      return engine?.kind === "mapbox" &&
+        "getMapboxAccessToken" in engine &&
+        typeof engine.getMapboxAccessToken === "function"
+        ? engine.getMapboxAccessToken()
+        : null;
+    },
+    getCesiumScene: () => {
+      const engine = mapControllerRef?.current;
+      return engine instanceof CesiumEngine ? engine.getCesiumScene() : null;
+    },
     getProjectSnapshot: () => buildProjectEgressSnapshot(mapControllerRef ?? { current: null }),
     openExternalUrl: (url: string) => void openExternalLink(url),
     pickLocalDirectoryFiles,
@@ -1185,24 +1312,32 @@ export function createAppAPI(mapControllerRef?: RefObject<MapController | null>)
       }
     },
     addMapControl: (
-      control: Parameters<MapController["addControl"]>[0],
-      position?: Parameters<MapController["addControl"]>[1],
-    ) => mapControllerRef?.current?.addControl(control, position) ?? false,
-    removeMapControl: (control: Parameters<MapController["removeControl"]>[0]) =>
-      mapControllerRef?.current?.removeControl(control),
+      control: Parameters<MapEngine["addControl"]>[0],
+      position?: Parameters<MapEngine["addControl"]>[1],
+    ) =>
+      mapControllerRef?.current?.addControl(control, position) ??
+      getPrimaryCesiumControlHost()?.addControl(control, position) ??
+      false,
+    removeMapControl: (control: Parameters<MapEngine["removeControl"]>[0]) => {
+      if (mapControllerRef?.current) {
+        mapControllerRef.current.removeControl(control);
+      } else {
+        getPrimaryCesiumControlHost()?.removeControl(control);
+      }
+    },
     setBuiltInMapControlVisible: (
-      control: Parameters<MapController["setBuiltInControlVisible"]>[0],
+      control: Parameters<MapEngine["setBuiltInControlVisible"]>[0],
       visible: boolean,
     ) => mapControllerRef?.current?.setBuiltInControlVisible(control, visible) ?? false,
     setTerrainEnabled: (enabled: boolean) =>
       mapControllerRef?.current?.setTerrainEnabled(enabled) ?? false,
     isTerrainEnabled: () => mapControllerRef?.current?.isTerrainEnabled() ?? false,
     getBuiltInMapControlPosition: (
-      control: Parameters<MapController["getBuiltInControlPosition"]>[0],
+      control: Parameters<MapEngine["getBuiltInControlPosition"]>[0],
     ) => mapControllerRef?.current?.getBuiltInControlPosition(control) ?? "top-right",
     setBuiltInMapControlPosition: (
-      control: Parameters<MapController["setBuiltInControlPosition"]>[0],
-      position: Parameters<MapController["setBuiltInControlPosition"]>[1],
+      control: Parameters<MapEngine["setBuiltInControlPosition"]>[0],
+      position: Parameters<MapEngine["setBuiltInControlPosition"]>[1],
     ) => mapControllerRef?.current?.setBuiltInControlPosition(control, position) ?? false,
     // Hand external plugins GeoLibre's own deck.gl modules so they render on the
     // host's single deck.gl instance (a bundled second copy throws on the
@@ -1278,6 +1413,9 @@ export function createAppAPI(mapControllerRef?: RefObject<MapController | null>)
     setActiveRightPanelDock,
     getActiveRightPanelDock,
     ...createPluginLocaleApi(i18n),
+    registerAssistantTool,
+    registerAssistantToolSpec,
+    registerAssistantGuidance,
     registerToolbarMenu,
     unregisterToolbarMenu,
     registerFloatingPanel,

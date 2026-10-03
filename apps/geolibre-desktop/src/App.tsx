@@ -9,10 +9,12 @@ import { useDesktopSettingsPersistence } from "./hooks/useDesktopSettings";
 import { useLayoutOptions } from "./hooks/useLayoutOptions";
 import { useProjectUrlLoader } from "./hooks/useProjectUrlLoader";
 import { useDataUrlLoader } from "./hooks/useDataUrlLoader";
+import { useStacUrlLoader } from "./hooks/useStacUrlLoader";
 import { useBeforeUnloadGuard } from "./hooks/useBeforeUnloadGuard";
 import { useRecentProjectsPersistence } from "./hooks/useRecentProjectsPersistence";
 import { useLayerLibraryPersistence } from "./hooks/useLayerLibraryPersistence";
 import { useLastBasemapPersistence } from "./hooks/useLastBasemapPersistence";
+import { useLastRendererPersistence } from "./hooks/useLastRendererPersistence";
 import { useStyleLibraryPersistence } from "./hooks/useStyleLibraryPersistence";
 import { useTemplateLibraryPersistence } from "./hooks/useTemplateLibraryPersistence";
 import { useRuntimeEnvironmentVariables } from "./hooks/useRuntimeEnvironmentVariables";
@@ -26,10 +28,11 @@ import { useWhiteboxToolUrl } from "./hooks/useWhiteboxToolUrl";
 import { useEmbedApi } from "./hooks/useEmbedApi";
 import { createAppAPI } from "./hooks/usePlugins";
 import { languageDirection } from "./i18n/languages";
-import { appMapControllerRef } from "./lib/map-controller-ref";
+import { appMapControllerRef, useAppMapReadyGeneration } from "./lib/map-controller-ref";
 
 export default function App() {
   useLastBasemapPersistence();
+  useLastRendererPersistence();
   // Re-renders on language change, so Radix primitives (menus, sliders, tabs)
   // pick up the right-to-left direction together with the document `dir`.
   const { i18n, t } = useTranslation();
@@ -45,12 +48,14 @@ export default function App() {
   // restoring startup project or another pre-shell guard must not make an
   // embedded Workspace tab invisible to its host. Store-backed commands can
   // arrive immediately; map-backed commands report their own readiness.
-  useEmbedApi(appMapControllerRef, mapAppAPI);
+  const mapReadyGeneration = useAppMapReadyGeneration();
+  useEmbedApi(appMapControllerRef, mapAppAPI, mapReadyGeneration);
   const handleMapReady = useCallback((api: ReturnType<typeof createAppAPI>) => {
     setMapAppAPI((current) => current ?? api);
   }, []);
   const projectUrlLoadState = useProjectUrlLoader();
   const dataUrlLoadState = useDataUrlLoader(mapAppAPI);
+  useStacUrlLoader(mapAppAPI, layoutOptions.viewer);
   const { showOnboarding, dismissOnboarding } = useUiProfileBootstrap();
   const { pending: pendingUpdate, remindLater, skipVersion } = useStartupUpdateCheck();
   useDesktopSettingsPersistence();

@@ -1,14 +1,17 @@
+import { showGlSearchResult } from "./gl-search-result";
 import {
   BLANK_BASEMAP,
   DEFAULT_BASEMAP,
   DEFAULT_PROJECT_PREFERENCES,
   getPlanetaryBasemapByStyleUrl,
   getRegionalBasemapByStyleUrl,
+  horizontalBbox,
   isRegionalBasemapSentinel,
   PLANETARY_BASEMAP_SENTINEL_PREFIX,
-  type RegionalBasemap,
   scaleAltitudeToActiveBody,
+  styleValue,
   useAppStore,
+  type RegionalBasemap,
 } from "@geolibre/core";
 import type {
   GeoLibreLayer,
@@ -21,9 +24,10 @@ import type {
   StoryChapterLocation,
 } from "@geolibre/core";
 import bbox from "@turf/bbox";
-import type { Feature, FeatureCollection, Geometry } from "geojson";
+import type { Feature, FeatureCollection, Geometry, Point, Polygon } from "geojson";
 import * as maplibregl from "maplibre-gl";
-import { LayerControl, type CustomLayerAdapter, type LayerState } from "maplibre-gl-layer-control";
+import { getLayerMetadataBounds, LayerControlHost } from "./layer-control-host";
+export { layerControlPaintToStyle, restoreControlOrder } from "./layer-control-host";
 import { CollapsedAttributionControl } from "./collapsed-attribution-control";
 import {
   circleLayerId,
@@ -31,27 +35,38 @@ import {
   clusterLayerId,
   fillExtrusionLayerId,
   fillLayerId,
+  generatorCircleLayerId,
+  generatorFillLayerId,
+  generatorLineLayerId,
   getLayerBounds,
   heatmapLayerId,
   highlightCircleLayerId,
   highlightFillLayerId,
   highlightLineLayerId,
   highlightSourceId,
+  invertedFillLayerId,
   labelLayerId,
+  lineDecorationLayerId,
   lineLayerId,
   markerLayerId,
   sourceId,
   textLayerId,
 } from "./geojson-loader";
+import { BASEMAP_LABEL_KEY, clearLayerLabels, publishLayerLabels } from "./layer-labels";
 import {
   mbtilesStyleLayerIds,
   externalSourceIdsFor,
+  hasPendingExternalNativeFilters,
+  hasZoomDependentClusterFilter,
   removeLayerFromMap,
   styleValuesEqual,
   syncLayer,
   vectorTileStyleLayerIds,
 } from "./layer-sync";
 import { globeSafeMaxZoom } from "./globe-fit-bounds";
+import { drawExtentOnCanvas } from "./extent-drawing";
+import { captureEngineImage } from "./map-capture";
+import type { CameraIdleEvent, ExtentDrawingOptions, MapExtent } from "./map-engine";
 import {
   blendModeSignature,
   installLayerBlendModes,
@@ -61,6 +76,15 @@ import { ensureGeneratedImageHandler } from "./generated-images";
 import { installGlobePopupOcclusion } from "./globe-popup-occlusion";
 import { isMapboxStyleUrl, loadMapboxStyle, redactMapboxStyleUrl } from "./mapbox-style";
 import { PlanetaryScaleControl } from "./planetary-scale-control";
+import {
+  boundsFillMinZoom,
+  latFromMercatorY,
+  lngFromMercatorX,
+  mercatorBoundsForLngLatBounds,
+  mercatorXFromLng,
+  mercatorYFromLat,
+  normalizeMapBounds,
+} from "./map-bounds";
 import { getOfflineBasemapStyle, isOfflineBasemapSentinel } from "./protomaps-basemap";
 import { ResetBearingControl } from "./reset-bearing-control";
 import { MaptoolkitLogoControl } from "./maptoolkit-logo-control";
@@ -68,6 +92,15 @@ import { TerrainControl, DEFAULT_TERRAIN_EXAGGERATION } from "./terrain-control"
 import { getDynamicPaintProperty, setDynamicPaintProperty } from "./dynamic-style-property";
 import { registerCogDemSource, type CogDemSourceRegistration } from "./cog-dem-source";
 import { installMapTransformCompat } from "./map-transform-compat";
+import {
+  MAPLIBRE_CAPABILITIES,
+  type BuiltInMapControl,
+  DEFAULT_BUILT_IN_CONTROL_VISIBILITY,
+  DEFAULT_BUILT_IN_CONTROL_POSITIONS,
+  STORY_OPACITY_PAINT_PROPERTIES,
+  type MapEngine,
+  type MapEngineCapabilities,
+} from "./map-engine";
 
 // Before any `Map` is constructed: re-expose `map.transform` for the packages
 // we do not control that still read it (deck.gl above all). See the module for
@@ -112,20 +145,29 @@ const NON_BASEMAP_STYLE_LAYER_IDS = [
   highlightLineLayerId(),
   highlightCircleLayerId(),
 ];
-const OPACITY_PAINT_PROPERTIES: Record<string, string[]> = {
-  background: ["background-opacity"],
-  // A point's outline fades with its fill so story playback can fully hide a
-  // circle layer; without the stroke property a faded-out point still renders
-  // as a hollow ring (#934).
-  circle: ["circle-opacity", "circle-stroke-opacity"],
-  fill: ["fill-opacity"],
-  "fill-extrusion": ["fill-extrusion-opacity"],
-  heatmap: ["heatmap-opacity"],
-  hillshade: ["hillshade-exaggeration"],
-  line: ["line-opacity"],
-  raster: ["raster-opacity"],
-  symbol: ["icon-opacity", "text-opacity"],
-};
+const OPACITY_PAINT_PROPERTIES = STORY_OPACITY_PAINT_PROPERTIES;
+
+/**
+ * The paint value a story fade writes for one property of one style layer.
+ *
+ * Fades write absolute opacities, but the geometry generator's fill/circle
+ * opacity is the product of the layer opacity and the style's own
+ * `geometryGeneratorOpacity` (see `applyGeometryGeneratorLayers`), so a fade
+ * back to 1 must not promote a translucent buffer to solid.
+ */
+function storyPaintOpacity(
+  layer: GeoLibreLayer,
+  nativeId: string,
+  prop: string,
+  opacity: number,
+): number {
+  const isGeneratorFill =
+    (nativeId === generatorFillLayerId(layer.id) && prop === "fill-opacity") ||
+    (nativeId === generatorCircleLayerId(layer.id) && prop === "circle-opacity");
+  if (!isGeneratorFill) return opacity;
+  const generatorOpacity = styleValue(layer.style, "geometryGeneratorOpacity");
+  return opacity * Math.min(1, Math.max(0, generatorOpacity));
+}
 const TERRAIN_SOURCE_ID = "geolibre-terrain-dem";
 const DEFAULT_TERRAIN_SOURCE: maplibregl.RasterDEMSourceSpecification = {
   type: "raster-dem",
@@ -149,28 +191,6 @@ const DEFAULT_TERRAIN_SOURCE: maplibregl.RasterDEMSourceSpecification = {
  * originating controller.
  */
 export const TERRAIN_SETTINGS_EVENT = "geolibre:terrain-settings-open";
-/** DOM class the LayerControl gives its container element. */
-const LAYER_CONTROL_SELECTOR = ".maplibregl-ctrl-layer-control";
-
-/**
- * Restore `refreshed` to just before `anchor` under `parent` after a
- * remove/re-add appended it to the end of its control corner. No-ops safely
- * when the reinsert can't be trusted: no parent, the anchor drifted to a
- * different parent, or `refreshed` is missing / already the anchor.
- *
- * Exported for unit testing; the reorder itself is only observable against a
- * real MapLibre control DOM (see refreshLayerControl).
- */
-export function restoreControlOrder(
-  parent: Element | null,
-  anchor: Element | null,
-  refreshed: Element | null,
-): void {
-  if (!parent) return;
-  if (anchor !== null && anchor.parentElement !== parent) return;
-  if (!refreshed || refreshed === anchor) return;
-  parent.insertBefore(refreshed, anchor);
-}
 /**
  * Window event dispatched when the terrain control is removed (e.g. hidden from
  * the Controls menu), so the React layer closes the exaggeration dialog rather
@@ -181,49 +201,6 @@ const EMPTY_HIGHLIGHT: FeatureCollection = {
   type: "FeatureCollection",
   features: [],
 };
-
-function isCustomControllableLayer(layer: GeoLibreLayer): boolean {
-  return typeof layer.metadata.customLayerType === "string";
-}
-
-/**
- * Translate a MapLibre paint property edited in the layer control's per-layer
- * style editor into a partial {@link LayerStyle} update for the store, so the
- * floating editor and the right-hand Style sidebar stay in sync (issue #912).
- *
- * Scope is deliberately limited to the raster color adjustments, which map
- * one-to-one to {@link LayerStyle} fields. Vector paint is **not** round-tripped
- * here: GeoLibre renders vector layers through an expression-based style model
- * (opacities are scaled by the layer opacity, and width/radius/colors become
- * `interpolate`/`case` expressions under proportional sizing, the meters width
- * unit, a data-driven `vectorStyleMode`, or simplestyle). The value the control
- * reads back is the *rendered* paint, so storing it verbatim would corrupt
- * those configurations. The control still applies vector edits to the map; the
- * sidebar Style panel remains the canonical editor for vector symbology.
- * Layer-level opacity is handled separately — see
- * {@link MapController.applyLayerControlStyleChange}.
- */
-export function layerControlPaintToStyle(
-  property: string,
-  value: unknown,
-): Partial<LayerStyle> | null {
-  if (typeof value !== "number") return null;
-
-  switch (property) {
-    case "raster-brightness-min":
-      return { rasterBrightnessMin: value };
-    case "raster-brightness-max":
-      return { rasterBrightnessMax: value };
-    case "raster-saturation":
-      return { rasterSaturation: value };
-    case "raster-contrast":
-      return { rasterContrast: value };
-    case "raster-hue-rotate":
-      return { rasterHueRotate: value };
-    default:
-      return null;
-  }
-}
 
 function nativeLayerSuffix(layerId: string): string | undefined {
   const suffix = layerId.split("-").pop();
@@ -274,7 +251,9 @@ function isGeoLibreSentinelStyleUrl(styleUrl: string | undefined): boolean {
   return Boolean(styleUrl?.startsWith("geolibre://"));
 }
 
-function resolveMapStyle(styleUrl: string | undefined): string | maplibregl.StyleSpecification {
+export function resolveMapStyle(
+  styleUrl: string | undefined,
+): string | maplibregl.StyleSpecification {
   if (styleUrl === BLANK_BASEMAP) return createBlankMapStyle();
   const offline = getOfflineBasemapStyle(styleUrl);
   // Return a fresh copy (like the planetary path below builds a new object each
@@ -402,75 +381,20 @@ function createPlanetaryMapStyle(basemap: PlanetaryBasemap): maplibregl.StyleSpe
   };
 }
 
-interface LayerControlConfig {
-  excludeLayers?: string[];
-  customLayerAdapters?: CustomLayerAdapter[];
-}
+// Moved to ./map-engine so MapEngine can reference it without importing this
+// module; re-exported here because 80-odd files import it from map-controller.
+export type { BuiltInMapControl };
 
-interface LayerControlInternalState {
-  panel?: HTMLElement;
-  state?: {
-    layerStates?: Record<
-      string,
-      {
-        visible: boolean;
-        opacity: number;
-        name: string;
-      }
-    >;
-  };
-}
+// Shared with the other engines from ./map-engine (see the note on
+// BuiltInMapControl above); re-exported so existing importers keep working.
+export { DEFAULT_BUILT_IN_CONTROL_VISIBILITY, DEFAULT_BUILT_IN_CONTROL_POSITIONS };
 
-interface GeoLibreLayerLabelWindow extends Window {
-  __GEOLIBRE_LAYER_LABELS__?: Record<string, string>;
-}
-
-export type BuiltInMapControl =
-  | "navigation"
-  | "fullscreen"
-  | "compass"
-  | "geolocate"
-  | "globe"
-  | "terrain"
-  | "scale"
-  | "attribution"
-  | "logo"
-  | "maptoolkit-logo"
-  | "layer-control";
-
-export const DEFAULT_BUILT_IN_CONTROL_VISIBILITY: Record<BuiltInMapControl, boolean> = {
-  navigation: false,
-  fullscreen: true,
-  compass: true,
-  geolocate: false,
-  globe: true,
-  terrain: false,
-  scale: true,
-  attribution: true,
-  logo: false,
-  "maptoolkit-logo": false,
-  "layer-control": true,
-};
-
-export const DEFAULT_BUILT_IN_CONTROL_POSITIONS: Record<
-  BuiltInMapControl,
-  maplibregl.ControlPosition
-> = {
-  navigation: "top-right",
-  fullscreen: "top-right",
-  compass: "top-right",
-  geolocate: "top-right",
-  globe: "top-right",
-  terrain: "top-right",
-  scale: "bottom-left",
-  attribution: "bottom-right",
-  logo: "bottom-left",
-  "maptoolkit-logo": "bottom-left",
-  "layer-control": "top-right",
-};
-
-export class MapController {
+export class MapController implements MapEngine {
+  readonly kind = "maplibre" as const;
+  readonly capabilities: MapEngineCapabilities = MAPLIBRE_CAPABILITIES;
   private map: maplibregl.Map | null = null;
+  /** Whether {@link clampViewToPreferences} has a clamp queued on `moveend`. */
+  private pendingViewClamp = false;
   private navigationControl: maplibregl.NavigationControl | null = null;
   private fullscreenControl: maplibregl.FullscreenControl | null = null;
   private compassControl: ResetBearingControl | null = null;
@@ -499,16 +423,30 @@ export class MapController {
   private attributionControl: maplibregl.AttributionControl | null = null;
   private logoControl: maplibregl.LogoControl | null = null;
   private maptoolkitLogoControl: MaptoolkitLogoControl | null = null;
-  private layerControl: LayerControl | null = null;
-  private layerControlSignature = "";
-  // Debounce timer for refreshing the layer control on style changes, so a
-  // plugin adding/removing native style layers (e.g. ones flagged
-  // `metadata["geolibre:internal"]`) updates the control's exclusion list.
-  private layerControlStyleRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-  // True while pushing store paint back into the layer control's open style
-  // editor, so onLayerStyleChange callbacks during that refresh are ignored
-  // (reentrancy guard against a sync loop). See syncLayerControlState.
-  private refreshingStyleEditor = false;
+  // The on-map layer control, shared with the Mapbox engine; every callback
+  // reads live controller state, so the host is safe to build before init().
+  private layerControlHost = new LayerControlHost({
+    getMap: () => this.map,
+    addControl: (control, position) => {
+      this.map?.addControl(control, position);
+    },
+    removeControl: (control) => this.removeControl(control),
+    getLayers: () => this.syncedLayers,
+    getNativeLayerIds: (layer) => this.getNativeLayerIds(layer),
+    getCandidateNativeLayerIds: (layer) => this.getCandidateStyleLayers(layer).map(({ id }) => id),
+    getSourceIds: (layer) => this.getLayerSourceIds(layer),
+    excludedLayerIds: LAYER_CONTROL_EXCLUDED_LAYERS,
+    // Planetary, offline, and regional basemaps all use a non-fetchable
+    // `geolibre://` sentinel (expanded to an inline style by resolveMapStyle);
+    // like the blank basemap they have no URL the control could fetch, so the
+    // host seeds it from getBasemapStyleLayerIds instead.
+    getBasemapStyleUrl: () =>
+      isGeoLibreSentinelStyleUrl(this.basemapStyleUrl) || this.basemapStyleUrl === BLANK_BASEMAP
+        ? null
+        : this.basemapStyleUrl,
+    getBasemapLayerIds: () => this.getBasemapStyleLayerIds(),
+    getBasemapState: () => ({ visible: this.basemapVisible, opacity: this.basemapOpacity }),
+  });
   private basemapStyleUrl = DEFAULT_BASEMAP;
   // Bumped on every style application so an asynchronously resolved style (the
   // Mapbox path in applyStyleToMap) can tell whether it is still the current one.
@@ -525,6 +463,8 @@ export class MapController {
   private layerIds: string[] = [];
   /** This pane's last blend-mode fingerprint; see `blendModeSignature`. */
   private blendSignature = "";
+  private clusterZoomHandler: (() => void) | null = null;
+  private pendingNativeFilterHandler: (() => void) | null = null;
   private styleReady = false;
   private controlVisibility: Record<BuiltInMapControl, boolean> = {
     ...DEFAULT_BUILT_IN_CONTROL_VISIBILITY,
@@ -627,20 +567,8 @@ export class MapController {
     this.map.once("idle", () => this.enforceProjection());
     // Plugins can add native style layers directly (outside the layer store);
     // refresh the layer control on style changes so internal-flagged layers are
-    // excluded reactively. Debounced (trailing edge) because styledata fires
-    // frequently, and refreshLayerControl no-ops when the computed signature is
-    // unchanged. Resetting the timer on each event waits until the burst of
-    // style updates quiets so the control never rebuilds against a half-built
-    // style.
-    this.map.on("styledata", () => {
-      if (this.layerControlStyleRefreshTimer !== null) {
-        clearTimeout(this.layerControlStyleRefreshTimer);
-      }
-      this.layerControlStyleRefreshTimer = setTimeout(() => {
-        this.layerControlStyleRefreshTimer = null;
-        this.refreshLayerControl(this.syncedLayers);
-      }, 200);
-    });
+    // excluded reactively (debounced by the host).
+    this.map.on("styledata", () => this.layerControlHost.scheduleStyleRefresh());
     // Add the fullscreen toggle first so it anchors the top of the top-right
     // control cluster, matching the universal placement users expect (issue
     // #512). MapLibre stacks controls in insertion order within a corner.
@@ -780,8 +708,10 @@ export class MapController {
    */
   setStoryLayerOpacity(layerId: string, opacity: number, durationMs?: number): void {
     if (!this.map) return;
+    const layer = this.syncedLayers.find((item) => item.id === layerId);
+    if (!layer) return;
     const clamped = Math.min(1, Math.max(0, opacity));
-    for (const nativeId of this.getNativeLayerIdsByLayerId(layerId)) {
+    for (const nativeId of this.getStoryStyleLayerIds(layer)) {
       const styleLayer = this.map.getLayer(nativeId);
       if (!styleLayer) continue;
       const props = OPACITY_PAINT_PROPERTIES[styleLayer.type] ?? [];
@@ -791,9 +721,39 @@ export class MapController {
             duration: durationMs,
           });
         }
-        setDynamicPaintProperty(this.map, nativeId, prop, clamped);
+        setDynamicPaintProperty(
+          this.map,
+          nativeId,
+          prop,
+          storyPaintOpacity(layer, nativeId, prop, clamped),
+        );
       }
     }
+  }
+
+  /**
+   * Every MapLibre style layer a story fade must reach for a project layer:
+   * its primary render layers plus the companion symbology `syncLayers` draws
+   * beside them (inverted fill, line decorations, geometry-generator output).
+   * The companions are internal (`geolibre:internal`) and so deliberately
+   * absent from {@link getCandidateStyleLayers}, which feeds identify and the
+   * layer control; without them a chapter that fades a layer out leaves its
+   * centroids or buffers on screen (discussion #2326).
+   */
+  private getStoryStyleLayerIds(layer: GeoLibreLayer): string[] {
+    const ids = this.getNativeLayerIds(layer);
+    if (layer.type !== "geojson") return ids;
+    const seen = new Set(ids);
+    for (const id of [
+      invertedFillLayerId(layer.id),
+      lineDecorationLayerId(layer.id),
+      generatorFillLayerId(layer.id),
+      generatorLineLayerId(layer.id),
+      generatorCircleLayerId(layer.id),
+    ]) {
+      if (!seen.has(id) && this.map?.getLayer(id)) ids.push(id);
+    }
+    return ids;
   }
 
   /**
@@ -813,7 +773,7 @@ export class MapController {
     // restored values animate back in (potentially over a multi-second fade).
     if (this.map) {
       for (const layer of this.syncedLayers) {
-        for (const nativeId of this.getNativeLayerIdsByLayerId(layer.id)) {
+        for (const nativeId of this.getStoryStyleLayerIds(layer)) {
           const styleLayer = this.map.getLayer(nativeId);
           if (!styleLayer) continue;
           for (const prop of OPACITY_PAINT_PROPERTIES[styleLayer.type] ?? []) {
@@ -1014,6 +974,8 @@ export class MapController {
   }
 
   destroy(): void {
+    for (const dispose of this.searchDisposers) dispose();
+    this.extentDrawingDispose?.();
     this.removeNavigationControl();
     this.removeFullscreenControl();
     this.removeCompassControl();
@@ -1029,12 +991,10 @@ export class MapController {
     this.removeAttributionControl();
     this.removeLogoControl();
     this.removeMaptoolkitLogoControl();
-    this.removeLayerControl();
-    if (this.layerControlStyleRefreshTimer !== null) {
-      clearTimeout(this.layerControlStyleRefreshTimer);
-      this.layerControlStyleRefreshTimer = null;
-    }
+    this.layerControlHost.destroy();
     this.abortPendingMapboxStyle();
+    this.removeClusterZoomListener();
+    this.removePendingNativeFilterListener();
     this.map?.remove();
     this.map = null;
     this.styleReady = false;
@@ -1205,7 +1165,7 @@ export class MapController {
     this.map.setTransformConstrain(
       createMapTransformConstraint(preferences, this.map, minZoom, maxZoom),
     );
-    this.applyView(this.readView());
+    this.clampViewToPreferences();
     // The ellipsoid or the scale unit can change here (Settings' dropdowns)
     // without the basemap changing, so push the unit and redraw the body-aware
     // scale bar now — the store's ellipsoid subscription has already updated the
@@ -1214,6 +1174,37 @@ export class MapController {
     // or both).
     this.scaleControl?.setUnit(preferences.scaleUnit);
     this.scaleControl?.refresh();
+  }
+
+  /**
+   * Re-apply the current camera so the constraints {@link applyMapPreferences}
+   * just installed (min/max zoom, max pitch, max bounds) actually clamp it.
+   *
+   * `applyView` gets there by jumping, and a jump *stops* an in-flight camera
+   * animation, leaving the camera wherever that animation had reached. Map
+   * preferences do change mid-animation: loading a LiDAR point cloud flips the
+   * projection preference through the deck.gl overlays' shared mercator lock
+   * from the very `load` event the plugin fires right after starting its
+   * fly-to-the-data, so that fly-to was being cancelled before it had moved a
+   * pixel and the layer never came into view. While the camera is moving,
+   * clamp once it settles instead — the setters above already constrain the
+   * animation's own target, so nothing escapes the new limits in the meantime.
+   */
+  private clampViewToPreferences(): void {
+    if (!this.map) return;
+    if (!this.isCameraMoving()) {
+      this.applyView(this.readView());
+      return;
+    }
+    // One deferred clamp is enough however many preference changes land during
+    // the same movement, and it must not re-arm on the `moveend` its own jump
+    // fires.
+    if (this.pendingViewClamp) return;
+    this.pendingViewClamp = true;
+    this.map.once("moveend", () => {
+      this.pendingViewClamp = false;
+      this.applyView(this.readView());
+    });
   }
 
   readView(): MapViewState {
@@ -1310,8 +1301,82 @@ export class MapController {
     this.applyBasemapVisibility();
     this.applyBasemapOpacity();
     this.publishLayerDisplayNames(layers);
-    this.refreshLayerControl(layers);
+    this.refreshLayerControl();
     this.syncLayerControlState();
+    this.syncClusterZoomListener(layers);
+    this.syncPendingNativeFilterListener(layers);
+  }
+
+  /**
+   * Sync again once a control's native layers reach the map.
+   *
+   * See {@link hasPendingExternalNativeFilters}: a control-owned layer's
+   * MapLibre layers can arrive after the sync pass that should have filtered
+   * them, and a restore that reproduces the saved store layer exactly leaves no
+   * store change to trigger another pass. Without this, reopening a project
+   * whose vector layer carries a persisted filter renders the full dataset.
+   *
+   * @param layers The layers just synced.
+   */
+  private syncPendingNativeFilterListener(layers: GeoLibreLayer[]): void {
+    const map = this.map;
+    const wanted = map !== null && hasPendingExternalNativeFilters(map, layers);
+    if (wanted === (this.pendingNativeFilterHandler !== null)) return;
+    if (!wanted || !map) {
+      this.removePendingNativeFilterListener();
+      return;
+    }
+    const handler = () => {
+      if (this.pendingNativeFilterHandler !== handler || !this.map) return;
+      // Style events also fire for the control's own intermediate work, so wait
+      // until every pending layer is actually there before spending a sync.
+      if (hasPendingExternalNativeFilters(this.map, this.syncedLayers)) return;
+      this.removePendingNativeFilterListener();
+      this.syncLayers(this.syncedLayers);
+    };
+    this.pendingNativeFilterHandler = handler;
+    map.on("styledata", handler);
+  }
+
+  private removePendingNativeFilterListener(): void {
+    if (!this.pendingNativeFilterHandler) return;
+    this.map?.off("styledata", this.pendingNativeFilterHandler);
+    this.pendingNativeFilterHandler = null;
+  }
+
+  /**
+   * Keep a `zoomend` resync attached exactly while some clustered layer holds a
+   * zoom-dependent authored filter.
+   *
+   * MapLibre clusters at the source, so such a filter is pre-applied to the
+   * source data once per sync rather than re-evaluated by the renderer with the
+   * live camera. Without this the layer would keep whatever the filter said at
+   * the zoom it was last synced at — a `[">=", ["zoom"], 8]` filter would hide
+   * the layer forever. Nothing is attached for the ordinary layer, and the
+   * pre-filter returns its previous collection when a zoom changes no outcome,
+   * so an attached listener does not re-cluster on every step either.
+   *
+   * @param layers The layers just synced.
+   */
+  private syncClusterZoomListener(layers: GeoLibreLayer[]): void {
+    const wanted = hasZoomDependentClusterFilter(layers);
+    if (wanted === (this.clusterZoomHandler !== null)) return;
+    if (!wanted) {
+      this.removeClusterZoomListener();
+      return;
+    }
+    const handler = () => {
+      if (this.clusterZoomHandler !== handler) return;
+      this.syncLayers(this.syncedLayers);
+    };
+    this.clusterZoomHandler = handler;
+    this.map?.on("zoomend", handler);
+  }
+
+  private removeClusterZoomListener(): void {
+    if (!this.clusterZoomHandler) return;
+    this.map?.off("zoomend", this.clusterZoomHandler);
+    this.clusterZoomHandler = null;
   }
 
   private styleLoadHandler: (() => void) | null = null;
@@ -1465,9 +1530,7 @@ export class MapController {
     }
 
     const bounds =
-      getLayerBounds(layer) ??
-      this.getLayerMetadataBounds(layer) ??
-      this.getLayerSourceBounds(layer);
+      getLayerBounds(layer) ?? getLayerMetadataBounds(layer) ?? this.getLayerSourceBounds(layer);
     if (!bounds || !this.map) return;
     const box: [[number, number], [number, number]] = [
       [bounds[0], bounds[1]],
@@ -1572,6 +1635,122 @@ export class MapController {
         ...(maxZoom === null ? {} : { maxZoom }),
       },
     );
+  }
+
+  private searchDisposers = new Set<() => void>();
+
+  private extentDrawingDispose: (() => void) | null = null;
+
+  getRenderSurface() {
+    return this.map;
+  }
+
+  getRenderStatus(): { pending: string[]; errors: string[] } {
+    const map = this.map;
+    if (!map) return { pending: [], errors: ["The map is not available"] };
+    return {
+      pending:
+        map.loaded() && map.areTilesLoaded() && !map.isMoving() ? [] : ["Map tiles and camera"],
+      errors: [],
+    };
+  }
+
+  captureImage(): Promise<Blob> {
+    return captureEngineImage(this);
+  }
+
+  onMapClick(listener: (lngLat: [number, number]) => void): () => void {
+    const map = this.map;
+    const onClick = (event: maplibregl.MapMouseEvent) =>
+      listener([event.lngLat.lng, event.lngLat.lat]);
+    map?.on("click", onClick);
+    return () => {
+      map?.off("click", onClick);
+    };
+  }
+
+  isCameraMoving(): boolean {
+    return this.map?.isMoving() ?? false;
+  }
+
+  onCameraMove(listener: () => void): () => void {
+    const map = this.map;
+    map?.on("move", listener);
+    return () => {
+      map?.off("move", listener);
+    };
+  }
+
+  onCameraIdle(listener: (event?: CameraIdleEvent) => void): () => void {
+    const map = this.map;
+    const onMoveEnd = (event: maplibregl.MapLibreEvent & { storyCameraToken?: number }) =>
+      listener({ storyCamera: event?.storyCameraToken !== undefined });
+    map?.on("moveend", onMoveEnd);
+    return () => {
+      map?.off("moveend", onMoveEnd);
+    };
+  }
+  stopCamera(): void {
+    this.map?.stop();
+  }
+  suspendNavigation(): () => void {
+    const map = this.map;
+    if (!map) return () => {};
+    const handlers = [
+      map.dragPan,
+      map.boxZoom,
+      map.dragRotate,
+      map.scrollZoom,
+      map.touchZoomRotate,
+      map.touchPitch,
+      map.doubleClickZoom,
+      map.keyboard,
+    ];
+    const enabled = handlers.map((handler) => handler.isEnabled());
+    handlers.forEach((handler) => handler.disable());
+    return () =>
+      handlers.forEach((handler, index) => {
+        if (enabled[index]) handler.enable();
+      });
+  }
+
+  getViewBounds(): MapExtent | null {
+    const bounds = this.map?.getBounds();
+    return bounds
+      ? [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]
+      : null;
+  }
+
+  showSearchResult(geometry: Point | Polygon): () => void {
+    const map = this.map;
+    if (!map) return () => {};
+    return showGlSearchResult(
+      map,
+      geometry,
+      (center, color) => new maplibregl.Marker({ color }).setLngLat(center).addTo(map),
+      this.searchDisposers,
+    );
+  }
+
+  showExtent(_extent: MapExtent): () => void {
+    // The extraction panels draw their MapLibre overlay above custom layers.
+    return () => {};
+  }
+
+  drawExtent(options: ExtentDrawingOptions): () => void {
+    this.extentDrawingDispose?.();
+    const map = this.map;
+    if (!map) return () => {};
+    this.extentDrawingDispose = drawExtentOnCanvas(
+      map.getCanvas(),
+      (point) => {
+        const location = map.unproject([point.x, point.y]);
+        return [location.lng, location.lat];
+      },
+      () => this.suspendNavigation(),
+      options,
+    );
+    return this.extentDrawingDispose;
   }
 
   /**
@@ -1871,9 +2050,9 @@ export class MapController {
 
   private fitFeature(featureCollection: FeatureCollection): void {
     if (!this.map || featureCollection.features.length === 0) return;
-    const box = bbox(featureCollection) as [number, number, number, number];
+    const box = horizontalBbox(bbox(featureCollection));
     // fitBounds validates the box and handles point-sized boxes.
-    this.fitBounds(box);
+    if (box) this.fitBounds(box);
   }
 
   private syncHighlight(featureCollection: FeatureCollection): void {
@@ -1958,323 +2137,21 @@ export class MapController {
   }
 
   private addLayerControl(): boolean {
-    if (!this.map || this.layerControl || !this.controlVisibility["layer-control"]) {
-      return false;
-    }
-    const layerControlConfig = this.createLayerControlConfig(this.syncedLayers);
-    this.layerControlSignature = this.createLayerControlSignature(layerControlConfig);
-    this.layerControl = new LayerControl({
-      // The layer control fetches this URL to introspect the basemap's layers.
-      // Planetary, offline, and regional basemaps all use a non-fetchable
-      // `geolibre://` sentinel (expanded to an inline style by resolveMapStyle),
-      // so hand the control the blank sentinel instead — like blank/raster
-      // basemaps it then skips the fetch (which would otherwise throw on the
-      // sentinel URL) and shows a single background entry.
-      basemapStyleUrl: isGeoLibreSentinelStyleUrl(this.basemapStyleUrl)
-        ? BLANK_BASEMAP
-        : this.basemapStyleUrl,
-      collapsed: true,
-      panelWidth: 340,
-      panelMinWidth: 240,
-      panelMaxWidth: 450,
-      ...layerControlConfig,
-      // The control toggles the basemap internally; mirror the change into the
-      // store (the source of truth) so external basemap UI — e.g. the left
-      // layer panel's visibility icon and opacity slider — stays in sync.
-      // Placed after the spread so these wired callbacks always win.
-      onBackgroundVisibilityChange: (visible) => {
-        useAppStore.getState().setBasemapVisible(visible);
-      },
-      onBackgroundOpacityChange: (opacity) => {
-        useAppStore.getState().setBasemapOpacity(opacity);
-      },
-      // The per-layer style editor edits MapLibre paint directly; mirror those
-      // edits into the store (the source of truth) so the right-hand Style
-      // sidebar stays in sync and the change survives the next layer sync.
-      onLayerStyleChange: (layerId, property, value) => {
-        this.applyLayerControlStyleChange(layerId, property, value);
-      },
-    });
-    this.map.addControl(this.layerControl, this.controlPositions["layer-control"]);
-    this.syncLayerControlState();
-    window.setTimeout(() => this.syncLayerControlState(), 100);
-    return true;
+    if (!this.map || !this.controlVisibility["layer-control"]) return false;
+    return this.layerControlHost.add(this.controlPositions["layer-control"]);
   }
 
   private removeLayerControl(): void {
-    if (!this.map || !this.layerControl) return;
-    this.removeControl(this.layerControl);
-    this.layerControl = null;
+    this.layerControlHost.remove();
   }
 
-  private refreshLayerControl(layers: GeoLibreLayer[]): void {
-    if (!this.map || !this.layerControl || !this.controlVisibility["layer-control"]) {
-      return;
-    }
-
-    const layerControlConfig = this.createLayerControlConfig(layers);
-    const nextSignature = this.createLayerControlSignature(layerControlConfig);
-    if (nextSignature === this.layerControlSignature) return;
-
-    // Capture the control's spot in its corner before the remove/re-add. The
-    // LayerControl's layer list is fixed at construction, so a refresh must
-    // rebuild it — but MapLibre's addControl re-appends to the end of the
-    // corner, which would drop the control below any controls inserted after it
-    // (e.g. a terrain control the user enabled post-load), visibly reordering
-    // the stack on every basemap/style change. Re-anchor it to its old sibling.
-    const container = this.map.getContainer();
-    const previous = container.querySelector(LAYER_CONTROL_SELECTOR);
-    const anchor = previous?.nextElementSibling ?? null;
-    const parent = previous?.parentElement ?? null;
-
-    this.removeLayerControl();
-    this.addLayerControl();
-
-    restoreControlOrder(parent, anchor, container.querySelector(LAYER_CONTROL_SELECTOR));
+  private refreshLayerControl(): void {
+    if (!this.controlVisibility["layer-control"]) return;
+    this.layerControlHost.refresh();
   }
 
   private syncLayerControlState(): void {
-    this.syncLayerControlBackgroundState();
-    this.syncLayerControlLayerStates(this.syncedLayers);
-    // Push the latest paint (already applied to the map by syncLayer) into the
-    // layer control's open style editor so edits made elsewhere — e.g. the
-    // right-hand Style sidebar — are reflected there too (issue #912). No-op
-    // when no editor is open; skips the input the user is actively dragging.
-    //
-    // Invariant: refreshStyleEditor() must NOT fire onLayerStyleChange. If it
-    // did, this path would loop forever (sync → refresh → onLayerStyleChange →
-    // applyLayerControlStyleChange → setLayerStyle → sync → ...). The upstream
-    // library guarantees this by setting input values programmatically, which
-    // does not dispatch an input event. The reentrancy guard below is a cheap
-    // defense in case a future upstream version regresses that guarantee.
-    this.refreshingStyleEditor = true;
-    try {
-      this.layerControl?.refreshStyleEditor();
-    } finally {
-      this.refreshingStyleEditor = false;
-    }
-  }
-
-  /**
-   * Mirror a paint property edited via the layer control's per-layer style
-   * editor into the store. The per-type opacities that GeoLibre derives
-   * directly from the layer-level opacity (raster/line/text/icon) map to
-   * {@link AppState.setLayerOpacity}; raster color adjustments map to
-   * {@link LayerStyle} via {@link layerControlPaintToStyle}. Other properties
-   * (vector paint) are ignored — see that helper for why.
-   */
-  private applyLayerControlStyleChange(layerId: string, property: string, value: unknown): void {
-    // Ignore callbacks that fire while we are pushing store values back into
-    // the editor; otherwise a misbehaving refresh could create a sync loop.
-    if (this.refreshingStyleEditor) return;
-    const store = useAppStore.getState();
-    // These paint properties equal the layer-level opacity in syncLayer
-    // (rasterPaint/heatmapPaint/linePaint use it directly; symbol layers set
-    // text-opacity/icon-opacity to it), so an edit to them is an edit to the
-    // layer's opacity and round-trips losslessly. fill-opacity/circle-opacity
-    // are deliberately not here: syncLayer scales them by the layer opacity, so
-    // the rendered value the control reports is not the raw style value.
-    if (
-      property === "raster-opacity" ||
-      property === "heatmap-opacity" ||
-      property === "line-opacity" ||
-      property === "text-opacity" ||
-      property === "icon-opacity"
-    ) {
-      if (typeof value === "number") store.setLayerOpacity(layerId, value);
-      return;
-    }
-    const styleUpdate = layerControlPaintToStyle(property, value);
-    if (styleUpdate) store.setLayerStyle(layerId, styleUpdate);
-  }
-
-  private createLayerControlConfig(layers: GeoLibreLayer[]): LayerControlConfig {
-    const nativeStyleLayerIds = layers.flatMap((layer) =>
-      this.getCandidateStyleLayers(layer).map(({ id }) => id),
-    );
-    // Hide style layers a plugin marks as internal chrome (e.g. selection
-    // footprints, draw/highlight helpers) so they don't clutter the control.
-    const internalStyleLayerIds = (this.map?.getStyle()?.layers ?? [])
-      .filter((styleLayer) =>
-        Boolean(
-          (styleLayer.metadata as Record<string, unknown> | undefined)?.["geolibre:internal"],
-        ),
-      )
-      .map((styleLayer) => styleLayer.id)
-      // Sort so a plugin reordering an already-hidden internal layer (which
-      // shuffles live style order) doesn't change the exclusion signature and
-      // force an unnecessary control rebuild.
-      .sort();
-    const excludeLayers = Array.from(
-      new Set([...LAYER_CONTROL_EXCLUDED_LAYERS, ...nativeStyleLayerIds, ...internalStyleLayerIds]),
-    );
-    const controllableLayers = layers.filter(
-      (layer) => this.getNativeLayerIds(layer).length > 0 || isCustomControllableLayer(layer),
-    );
-
-    if (controllableLayers.length === 0) {
-      return { excludeLayers };
-    }
-
-    return {
-      excludeLayers,
-      customLayerAdapters: [this.createGeoLibreLayerAdapter(controllableLayers)],
-    };
-  }
-
-  private createLayerControlSignature(config: LayerControlConfig): string {
-    // Only structural attributes belong in the signature. Opacity and
-    // visibility are managed in place by the control and persisted to the
-    // store; including them here would destroy and recreate the control
-    // (collapsing it and interrupting the drag) on every slider or checkbox
-    // interaction.
-    return JSON.stringify({
-      excluded: config.excludeLayers ?? [],
-      layers: config.customLayerAdapters?.flatMap((adapter) =>
-        adapter.getLayerIds().map((id) => {
-          const state = adapter.getLayerState(id);
-          return {
-            id,
-            name: state?.name,
-            symbol: adapter.getSymbolType?.(id),
-          };
-        }),
-      ),
-    });
-  }
-
-  private syncLayerControlBackgroundState(): void {
-    if (!this.layerControl) return;
-    const control = this.layerControl as unknown as LayerControlInternalState;
-
-    const backgroundState =
-      control.state?.layerStates?.Background ??
-      (control.state?.layerStates
-        ? (control.state.layerStates.Background = {
-            visible: this.basemapVisible,
-            opacity: this.basemapOpacity,
-            name: "Background",
-          })
-        : null);
-    if (backgroundState) {
-      backgroundState.visible = this.basemapVisible;
-      backgroundState.opacity = this.basemapOpacity;
-    }
-
-    const backgroundItem = this.getLayerControlItem("Background");
-    if (!backgroundItem) return;
-
-    this.updateLayerControlItem(backgroundItem, {
-      name: "Background",
-      visible: this.basemapVisible,
-      opacity: this.basemapOpacity,
-    });
-  }
-
-  private syncLayerControlLayerStates(layers: GeoLibreLayer[]): void {
-    if (!this.layerControl) return;
-    const control = this.layerControl as unknown as LayerControlInternalState;
-
-    for (const layer of layers) {
-      const layerState = control.state?.layerStates?.[layer.id];
-      if (layerState) {
-        layerState.visible = layer.visible;
-        layerState.opacity = layer.opacity;
-        layerState.name = layer.name;
-      }
-
-      const layerItem = this.getLayerControlItem(layer.id);
-      if (!layerItem) continue;
-      this.updateLayerControlItem(layerItem, {
-        name: layer.name,
-        visible: layer.visible,
-        opacity: layer.opacity,
-      });
-    }
-  }
-
-  private getLayerControlItem(layerId: string): HTMLElement | null {
-    const control = this.layerControl as unknown as LayerControlInternalState;
-    const items = control.panel?.querySelectorAll(".layer-control-item") ?? [];
-    return (
-      (Array.from(items).find((item) => (item as HTMLElement).dataset.layerId === layerId) as
-        | HTMLElement
-        | undefined) ?? null
-    );
-  }
-
-  private updateLayerControlItem(
-    item: HTMLElement,
-    state: { name: string; visible: boolean; opacity: number },
-  ): void {
-    const checkbox = item.querySelector(".layer-control-checkbox") as HTMLInputElement | null;
-    if (checkbox) checkbox.checked = state.visible;
-
-    const opacity = item.querySelector(".layer-control-opacity") as HTMLInputElement | null;
-    if (opacity) {
-      opacity.value = String(state.opacity);
-      opacity.title = `Opacity: ${Math.round(state.opacity * 100)}%`;
-    }
-
-    const name = item.querySelector(".layer-control-name") as HTMLElement | null;
-    if (name) {
-      name.textContent = state.name;
-      name.title = state.name;
-    }
-  }
-
-  private createGeoLibreLayerAdapter(layers: GeoLibreLayer[]): CustomLayerAdapter {
-    const layerById = new Map(layers.map((layer) => [layer.id, layer]));
-
-    return {
-      type: "geolibre",
-      getLayerIds: () => layers.map((layer) => layer.id),
-      getLayerState: (layerId) => {
-        const layer = layerById.get(layerId);
-        if (!layer) return null;
-        return {
-          visible: layer.visible,
-          opacity: layer.opacity,
-          name: layer.name,
-          isCustomLayer: true,
-          customLayerType: this.getLayerSymbolType(layer),
-        } satisfies LayerState;
-      },
-      setVisibility: (layerId, visible) => {
-        // Update the store (the source of truth) and let the layer sync
-        // pass apply the visibility change to the map, so it is not undone
-        // by the next syncLayers.
-        useAppStore.getState().setLayerVisibility(layerId, visible);
-      },
-      setOpacity: (layerId, opacity) => {
-        // Persist opacity to the layer model; syncLayer derives paint from
-        // layer.opacity, so updating the store keeps the map and UI in sync.
-        useAppStore.getState().setLayerOpacity(layerId, opacity);
-      },
-      getName: (layerId) => layerById.get(layerId)?.name ?? layerId,
-      getSymbolType: (layerId) => {
-        const layer = layerById.get(layerId);
-        return layer ? this.getLayerSymbolType(layer) : "custom";
-      },
-      getBounds: (layerId) => {
-        const layer = layerById.get(layerId);
-        if (!layer) return null;
-        // GeoJSON-backed layers derive bounds from their features; other
-        // layer types fall back to their source bounds (TileJSON) when
-        // advertised, and return null (no zoom-to-bounds) otherwise.
-        return (
-          getLayerBounds(layer) ??
-          this.getLayerMetadataBounds(layer) ??
-          this.getLayerSourceBounds(layer)
-        );
-      },
-      getNativeLayerIds: (layerId) => this.getNativeLayerIdsByLayerId(layerId),
-      removeLayer: (layerId) => {
-        // Remove the logical layer from the store; syncLayers then tears
-        // down the native sources/layers, keeping project state in sync.
-        useAppStore.getState().removeLayer(layerId);
-      },
-    };
+    this.layerControlHost.syncState();
   }
 
   private getNativeLayerIdsByLayerId(layerId: string): string[] {
@@ -2286,26 +2163,6 @@ export class MapController {
     return this.getCandidateStyleLayers(layer)
       .map(({ id }) => id)
       .filter((id) => this.map?.getLayer(id));
-  }
-
-  private getLayerSymbolType(layer: GeoLibreLayer): string {
-    const nativeLayer = this.getNativeLayerIds(layer)
-      .map((id) => this.map?.getLayer(id))
-      .find((item) => Boolean(item));
-
-    return (
-      nativeLayer?.type ??
-      (typeof layer.metadata.customLayerType === "string"
-        ? layer.metadata.customLayerType
-        : "custom")
-    );
-  }
-
-  private getLayerMetadataBounds(layer: GeoLibreLayer): [number, number, number, number] | null {
-    return (
-      this.normalizeLayerBounds(layer.source.bounds) ??
-      this.normalizeLayerBounds(layer.metadata.bounds)
-    );
   }
 
   private getLayerSourceBounds(layer: GeoLibreLayer): [number, number, number, number] | null {
@@ -2461,10 +2318,7 @@ export class MapController {
   }
 
   private publishLayerDisplayNames(layers: GeoLibreLayer[]): void {
-    if (typeof window === "undefined") return;
-
-    const labelWindow = window as GeoLibreLayerLabelWindow;
-    labelWindow.__GEOLIBRE_LAYER_LABELS__ = Object.fromEntries([
+    publishLayerLabels([
       ...layers
         .flatMap((layer) => this.getNamedStyleLayers(layer))
         .map(({ id, name }): [string, string] => [id, name]),
@@ -2489,9 +2343,8 @@ export class MapController {
       // always wins over a layer that happens to share the id, matching the
       // sidebar. It is published even with no overlay layers, since the panel
       // always lists the basemap entry.
-      ["__basemap__", this.backgroundLabel],
+      [BASEMAP_LABEL_KEY, this.backgroundLabel],
     ]);
-    window.dispatchEvent(new CustomEvent("geolibre-layer-labels-change"));
   }
 
   /**
@@ -2500,9 +2353,7 @@ export class MapController {
    * which always re-publishes the basemap entry.
    */
   private clearLayerDisplayNames(): void {
-    if (typeof window === "undefined") return;
-    (window as GeoLibreLayerLabelWindow).__GEOLIBRE_LAYER_LABELS__ = {};
-    window.dispatchEvent(new CustomEvent("geolibre-layer-labels-change"));
+    clearLayerLabels();
   }
 
   private addNavigationControl(): boolean {
@@ -3065,19 +2916,8 @@ function effectiveMinZoomForPreferences(
   map: maplibregl.Map,
   requestedMinZoom: number,
 ): number {
-  const bounds = preferences.restrictBounds && normalizeMapBounds(preferences.bounds);
-  if (!bounds) return requestedMinZoom;
-
-  const mercatorBounds = mercatorBoundsForLngLatBounds(bounds);
-  const widthRatio = Math.abs(mercatorBounds.east - mercatorBounds.west);
-  const heightRatio = Math.abs(mercatorBounds.south - mercatorBounds.north);
-  if (widthRatio <= 0 || heightRatio <= 0) return requestedMinZoom;
-
   const canvas = map.getCanvas();
-  const minZoomForWidth = Math.log2(canvas.clientWidth / (512 * widthRatio));
-  const minZoomForHeight = Math.log2(canvas.clientHeight / (512 * heightRatio));
-
-  return clampNumber(Math.max(requestedMinZoom, minZoomForWidth, minZoomForHeight), 0, 24);
+  return boundsFillMinZoom(preferences, canvas.clientWidth, canvas.clientHeight, requestedMinZoom);
 }
 
 function constrainCenterToVisibleBounds(
@@ -3111,53 +2951,6 @@ function constrainCenterToVisibleBounds(
         : (mercatorBounds.north + mercatorBounds.south) / 2,
     ),
   );
-}
-
-function mercatorBoundsForLngLatBounds(bounds: MapPreferences["bounds"]): {
-  west: number;
-  south: number;
-  east: number;
-  north: number;
-} {
-  return {
-    west: mercatorXFromLng(bounds[0]),
-    south: mercatorYFromLat(bounds[1]),
-    east: mercatorXFromLng(bounds[2]),
-    north: mercatorYFromLat(bounds[3]),
-  };
-}
-
-function mercatorXFromLng(lng: number): number {
-  return (lng + 180) / 360;
-}
-
-function lngFromMercatorX(x: number): number {
-  return x * 360 - 180;
-}
-
-function mercatorYFromLat(lat: number): number {
-  const radians = (clampNumber(lat, -85, 85) * Math.PI) / 180;
-  return (1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2;
-}
-
-function latFromMercatorY(y: number): number {
-  return (Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) * 180) / Math.PI;
-}
-
-function normalizeMapBounds(bounds: MapPreferences["bounds"]): MapPreferences["bounds"] | null {
-  const [west, south, east, north] = bounds;
-  if (![west, south, east, north].every(Number.isFinite)) return null;
-  const normalized: MapPreferences["bounds"] = [
-    clampNumber(west, -180, 180),
-    clampNumber(south, -85, 85),
-    clampNumber(east, -180, 180),
-    clampNumber(north, -85, 85),
-  ];
-  if (normalized[0] >= normalized[2] || normalized[1] >= normalized[3]) {
-    return null;
-  }
-
-  return normalized;
 }
 
 function mapBoundsForPreferences(preferences: MapPreferences): maplibregl.LngLatBoundsLike | null {

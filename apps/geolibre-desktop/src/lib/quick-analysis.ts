@@ -4,7 +4,7 @@ import {
   type GeoLibreLayer,
   type MapScaleUnit,
 } from "@geolibre/core";
-import type { MapController } from "@geolibre/map";
+import type { MapEngine } from "@geolibre/map";
 import {
   getNetworkTool,
   getVectorTool,
@@ -207,7 +207,7 @@ export interface QuickAnalysisRequest {
    */
   extraLayers?: GeoLibreLayer[];
   /** Live map controller, used to frame the result. */
-  mapControllerRef: { current: MapController | null };
+  mapControllerRef: { current: MapEngine | null };
 }
 
 /** Resolve a tool id against the registries Quick analysis draws from. */
@@ -230,7 +230,11 @@ export async function runQuickAnalysis(request: QuickAnalysisRequest): Promise<s
   const { toolId, parameters, resultName, extraLayers = [], mapControllerRef } = request;
   const tool = resolveQuickTool(toolId);
   if (!tool) {
-    setStatus({ phase: "error", toolName: toolId, message: `Unknown tool "${toolId}"` });
+    setStatus({
+      phase: "error",
+      toolName: toolId,
+      message: `Unknown tool "${toolId}"`,
+    });
     return null;
   }
 
@@ -262,12 +266,7 @@ export async function runQuickAnalysis(request: QuickAnalysisRequest): Promise<s
     const captured = await runAlgorithmCapture(tool, parameters, {
       layers: [...useAppStore.getState().layers, ...extraLayers],
       log,
-      viewportBounds: () => {
-        const map = mapControllerRef.current?.getMap();
-        if (!map) return null;
-        const bounds = map.getBounds();
-        return [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
-      },
+      viewportBounds: () => mapControllerRef.current?.getViewBounds() ?? null,
     });
 
     if (softError) {

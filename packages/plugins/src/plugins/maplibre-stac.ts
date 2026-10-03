@@ -1,7 +1,14 @@
 import { DEFAULT_LAYER_STYLE, useAppStore } from "@geolibre/core";
-import { fillLayerId, lineLayerId } from "@geolibre/map";
+import {
+  fillLayerId,
+  lineLayerId,
+  mapboxFillLayerId,
+  mapboxLineLayerId,
+} from "@geolibre/map/style-layer-ids";
 import type { FeatureCollection, Geometry } from "geojson";
-import type { GeoJSONSource, MapMouseEvent, Map as MapLibreMap } from "maplibre-gl";
+import type { GeoJSONSource, Map as MapLibreMap } from "maplibre-gl";
+import type { Map as MapboxMap } from "mapbox-gl";
+
 import type {
   GeoLibreAppAPI,
   GeoLibreCogLayerOptions,
@@ -17,12 +24,14 @@ import {
   connectStac,
   horizontalBbox,
   icechunkBranch,
-  isAzureBlobHref,
   isIcechunkAsset,
   isVisualizableAsset,
   requiresTarget,
   itemBbox,
   loadStacIndex,
+  loadPortolanIndex,
+  portolanIndexFromDocument,
+  PORTOLAN_REGISTRY_URL,
   openCatalogNode,
   searchStacApi,
   searchStaticStac,
@@ -44,7 +53,7 @@ import {
 } from "./stac-api";
 import { buildCatalogTree } from "./stac-catalog-tree";
 import { el, setDisabled } from "../panel-dom";
-import { addVectorLayerFromUrl } from "./maplibre-vector";
+import { addVectorLayersFromUrl } from "./maplibre-vector";
 import { addZarrRasterLayer } from "./maplibre-components";
 import {
   icechunkLayerUrl,
@@ -53,15 +62,34 @@ import {
   repositoryOpenError,
   type ZarrKeyReader,
 } from "./stac-icechunk";
+import {
+  createStacAssetAccess,
+  readableStacAssetHref,
+  STAC_ASSET_ACCESS_METADATA_KEY,
+  type StacAssetAccess,
+} from "./stac-signing";
 
 export const STAC_PLUGIN_ID = "geolibre-stac-catalogs";
 export const PLANET_OPEN_DATA_PLUGIN_ID = "geolibre-planet-open-data";
+export const PORTOLAN_PLUGIN_ID = "geolibre-portolan";
 export const PLANET_DISASTER_DATA_CATALOG_URL =
   "https://data.source.coop/planet/disasterdata/catalog.json";
 // The footprints layer is a normal store layer, so it is saved into the project
 // while `footprintLayerId` only lives for the session. This marker is how a
 // later search — or a reopened project — recognizes the layer as ours instead
 // of adding a second copy.
+type StacPointerEvent = { point: { x: number; y: number } };
+type StacMap = Omit<MapLibreMap | MapboxMap, "getSource" | "on" | "off"> & {
+  getSource(id: string): unknown;
+  on(type: "click" | "mousemove", listener: (event: StacPointerEvent) => void): unknown;
+  off(type: "click" | "mousemove", listener: (event: StacPointerEvent) => void): unknown;
+};
+
+/** STAC uses the native GeoJSON, picking and pointer APIs shared by both engines. */
+function getStacMap(app: GeoLibreAppAPI | null): StacMap | null {
+  return app?.getMap?.() ?? app?.getMapboxMap?.() ?? null;
+}
+
 const FOOTPRINT_SOURCE_KIND = "stac-footprints";
 const DRAW_SOURCE = "geolibre-stac-draw-bbox";
 const DRAW_FILL = "geolibre-stac-draw-bbox-fill";
@@ -355,6 +383,20 @@ let unregisterPanel: (() => void) | null = null;
 let disposePanel: (() => void) | null = null;
 let panelContainer: HTMLElement | null = null;
 let initialCatalogUrl = "";
+// A catalog asked for from outside the panel (the `?stac=` deep link), taking the place of the
+// plugin's own preset on its next activation.
+let requestedCatalogUrl = "";
+// Which createStacPlugin() instance owns the shared state above, since they all share it.
+let activePluginId: string | null = null;
+interface CatalogBrowserOptions {
+  loadIndex?: typeof loadStacIndex;
+  indexFromConnection?: (connection: StacConnection) => StacIndexCatalog[];
+  catalogSearchLabel?: (app: GeoLibreAppAPI) => string;
+  indexLabels?: (
+    app: GeoLibreAppAPI,
+  ) => Pick<StacLabels, "indexLoading" | "indexUnavailable" | "indexLoadFailed">;
+}
+let browserOptions: CatalogBrowserOptions = {};
 
 // The results pane and the controls above it each keep a floor so neither can
 // be dragged away entirely. splitterBounds() reserves the controls floor and
@@ -408,7 +450,7 @@ function field(label: string, type = "text"): { wrap: HTMLElement; input: HTMLIn
 }
 
 function currentExtent(): [number, number, number, number] | undefined {
-  const bounds = appRef?.getMap?.()?.getBounds();
+  const bounds = getStacMap(appRef)?.getBounds();
   if (!bounds) return undefined;
   const west = Math.max(-180, bounds.getWest());
   const east = Math.min(180, bounds.getEast());
@@ -434,13 +476,13 @@ function removeFootprints(): void {
   footprintLayerId = null;
 }
 
-function removeDrawBox(map: MapLibreMap): void {
+function removeDrawBox(map: StacMap): void {
   if (map.getLayer(DRAW_LINE)) map.removeLayer(DRAW_LINE);
   if (map.getLayer(DRAW_FILL)) map.removeLayer(DRAW_FILL);
   if (map.getSource(DRAW_SOURCE)) map.removeSource(DRAW_SOURCE);
 }
 
-function showDrawBox(map: MapLibreMap, bbox: [number, number, number, number]): void {
+function showDrawBox(map: StacMap, bbox: [number, number, number, number]): void {
   const [west, south, east, north] = bbox;
   const data: FeatureCollection = {
     type: "FeatureCollection",
@@ -490,7 +532,7 @@ function showDrawBox(map: MapLibreMap, bbox: [number, number, number, number]): 
 function beginBboxDraw(
   onComplete: (bbox: [number, number, number, number]) => void,
 ): (() => void) | null {
-  const map = appRef?.getMap?.();
+  const map = getStacMap(appRef);
   if (!map) return null;
   const canvas = map.getCanvas();
   let start: { lng: number; lat: number } | null = null;
@@ -583,14 +625,14 @@ function showFootprints(items: StacItem[]): void {
   });
 }
 
-function removeSelectionHighlight(map: MapLibreMap): void {
+function removeSelectionHighlight(map: StacMap): void {
   if (map.getLayer(SELECT_LINE)) map.removeLayer(SELECT_LINE);
   if (map.getLayer(SELECT_FILL)) map.removeLayer(SELECT_FILL);
   if (map.getSource(SELECT_SOURCE)) map.removeSource(SELECT_SOURCE);
 }
 
 function showSelectionHighlight(geometry: Geometry | null): void {
-  const map = appRef?.getMap?.();
+  const map = getStacMap(appRef);
   if (!map) return;
   if (!geometry) {
     removeSelectionHighlight(map);
@@ -621,11 +663,14 @@ function showSelectionHighlight(geometry: Geometry | null): void {
 }
 
 /** Native style layers backing the footprint store layer, if it is on the map. */
-function footprintStyleLayers(map: MapLibreMap): string[] {
+function footprintStyleLayers(map: StacMap): string[] {
   if (!footprintLayerId) return [];
-  return [fillLayerId(footprintLayerId), lineLayerId(footprintLayerId)].filter((id) =>
-    map.getLayer(id),
-  );
+  return [
+    fillLayerId(footprintLayerId),
+    lineLayerId(footprintLayerId),
+    mapboxFillLayerId(footprintLayerId),
+    mapboxLineLayerId(footprintLayerId),
+  ].filter((id) => map.getLayer(id));
 }
 
 function assetLabel(key: string, asset: StacAsset): string {
@@ -664,45 +709,53 @@ function assetOptionLabel(item: StacItem, key: string, asset: StacAsset): string
   return `${assetLabel(key, asset)} — ${assetFormatLabel(asset)}${addability}`;
 }
 
-type SasSigner = { signUrl(url: string, collectionId: string): Promise<string> };
-let sasManager: Promise<SasSigner> | null = null;
-
-function planetaryComputerSigner(): Promise<SasSigner> {
-  sasManager ??= import("maplibre-gl-planetary-computer")
-    .then((module) => new module.SASTokenManager())
-    .catch((error) => {
-      // Don't let one failed import disable signing for the rest of the session.
-      sasManager = null;
-      throw error;
-    });
-  return sasManager;
+/**
+ * Planetary Computer serves several collections from private containers that answer 409 without
+ * a SAS token, while others (NAIP) read fine anonymously.
+ * Signed URLs expire within the hour, so they are minted when the asset is added rather than when
+ * the item is parsed, and cached until shortly before expiry. Anything
+ * that is not an eligible Planetary Computer Azure blob, or that cannot be signed, is read
+ * unsigned. COG and GeoParquet layers retain the unsigned asset identity in metadata so project
+ * restore can mint a fresh token instead of replaying an expired one.
+ */
+function assetAccess(
+  connection: StacConnection,
+  item: StacItem,
+  href: string,
+): StacAssetAccess | null {
+  return createStacAssetAccess(connection.url, item.collection, href);
 }
 
 /**
- * Planetary Computer serves several collections — most of the GeoParquet ones — from private
- * containers that answer 409 without a SAS token, while others (NAIP) read fine anonymously.
- * Tokens are per-collection and expire within the hour, so they are minted when the asset is
- * added rather than when the item is parsed, and the upstream manager caches them. Anything
- * that is not an Azure blob, or that cannot be signed, is read unsigned.
+ * Records how a layer's asset can be signed again, so a saved project restores
+ * a private asset instead of replaying an expired token.
  *
- * Only the GeoParquet path signs, because that is the one this branch made addable and it cannot
- * read a private container at all unsigned. PMTiles and COG read unsigned exactly as they did
- * before, rather than gaining a token they never had.
- *
- * Every one of these formats persists whatever URL it is handed: PMTiles and COG through the
- * store layer they create, and the vector control through `createVectorStoreLayer`, which records
- * the URL as both `source.url` and `sourcePath`. A project saved with a signed GeoParquet layer
- * therefore holds a token that `restoreVectorLayers` replays as-is and never re-signs, so the
- * layer stops reloading once the token lapses (about an hour). Fixing that properly means minting
- * the token per request, or re-signing on restore, rather than baking one in at add time.
+ * The layer has to be in the store already: every add path here resolves only
+ * after its control's store sync has written it (see the Zarr branch below).
+ * Should that ever stop holding, signed assets would quietly stop surviving a
+ * project save, so say so rather than dropping the record in silence.
  */
-async function readableHref(item: StacItem, href: string): Promise<string> {
-  if (!isAzureBlobHref(href) || !item.collection) return href;
-  try {
-    return await (await planetaryComputerSigner()).signUrl(href, item.collection);
-  } catch {
-    return href;
+function rememberAssetAccess(layerId: string, access: StacAssetAccess | null): void {
+  if (!access) return;
+  const layer = useAppStore.getState().layers.find((candidate) => candidate.id === layerId);
+  if (!layer) {
+    console.warn("[GeoLibre] STAC asset access could not be stored: no layer", layerId);
+    return;
   }
+  useAppStore.getState().updateLayer(layerId, {
+    metadata: { ...layer.metadata, [STAC_ASSET_ACCESS_METADATA_KEY]: access },
+    source: { ...layer.source, url: access.href },
+    sourcePath: access.href,
+  });
+}
+
+function readableHref(
+  connection: StacConnection,
+  item: StacItem,
+  href: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  return readableStacAssetHref(assetAccess(connection, item, href), href, signal);
 }
 
 /**
@@ -725,6 +778,7 @@ async function openIcechunkAsset(
 }
 
 async function visualizeAsset(
+  connection: StacConnection,
   item: StacItem,
   key: string,
   asset: StacAsset,
@@ -737,6 +791,9 @@ async function visualizeAsset(
   switch (format) {
     case "pmtiles": {
       // No appRef check: the layer goes to the store, not through the app API.
+      // Read unsigned, exactly as before: Planetary Computer serves no PMTiles
+      // from a private container, and a tile URL that outlives its token would
+      // break the layer an hour later rather than fix it.
       if (!(await addPMTilesAsset(asset.href, name, signal))) {
         throw new Error(labels.addNoSourceLayers);
       }
@@ -744,7 +801,7 @@ async function visualizeAsset(
     }
     case "geojson": {
       if (!appRef) throw new Error(labels.addFailed);
-      const response = await fetch(asset.href, {
+      const response = await fetch(await readableHref(connection, item, asset.href, signal), {
         headers: { Accept: "application/geo+json, application/json" },
         signal,
       });
@@ -755,9 +812,13 @@ async function visualizeAsset(
     }
     case "parquet": {
       if (!appRef) throw new Error(labels.addFailed);
-      if (!(await addVectorLayerFromUrl(appRef, await readableHref(item, asset.href), { name }))) {
+      const access = assetAccess(connection, item, asset.href);
+      const href = await readableStacAssetHref(access, asset.href, signal);
+      const layerIds = await addVectorLayersFromUrl(appRef, href, { name });
+      if (!layerIds?.length) {
         throw new Error(labels.addFailed);
       }
+      for (const layerId of layerIds) rememberAssetAccess(layerId, access);
       return;
     }
     case "zarr": {
@@ -816,7 +877,10 @@ async function visualizeAsset(
     }
     case "cog": {
       if (!appRef?.addCogLayer) throw new Error(labels.cogUnsupported);
-      await appRef.addCogLayer(name, asset.href, cogOptions);
+      const access = assetAccess(connection, item, asset.href);
+      const href = await readableStacAssetHref(access, asset.href, signal);
+      const layerId = await appRef.addCogLayer(name, href, cogOptions);
+      rememberAssetAccess(layerId, access);
       return;
     }
     case null:
@@ -843,11 +907,14 @@ function buildPanel(container: HTMLElement): () => void {
 
   const catalogSection = el("div");
   catalogSection.style.cssText = style.section;
-  const catalogSearch = field(labels.catalogSearch);
+  const catalogSearch = field(
+    (appRef && browserOptions.catalogSearchLabel?.(appRef)) || labels.catalogSearch,
+  );
   catalogSearch.input.placeholder = labels.catalogSearchPlaceholder;
   const catalogSelect = el("select");
   catalogSelect.style.cssText = style.input;
-  const firstOption = el("option", labels.indexLoading);
+  const indexLabels = (appRef && browserOptions.indexLabels?.(appRef)) || labels;
+  const firstOption = el("option", indexLabels.indexLoading);
   firstOption.value = "";
   catalogSelect.append(firstOption);
   const urlField = field(labels.urlLabel, "url");
@@ -1243,6 +1310,9 @@ function buildPanel(container: HTMLElement): () => void {
         targetSelect.style.cssText = `${style.input}flex:1 1 140px;width:auto;`;
         targetSelect.title = labels.chooseTarget;
         let adding = false;
+        // Which asset's download is being signed, so switching the dropdown to
+        // another asset does not find its own button disabled.
+        let signingDownloadKey: string | null = null;
 
         const syncAsset = (): void => {
           const [key, asset] = selected();
@@ -1262,6 +1332,9 @@ function buildPanel(container: HTMLElement): () => void {
           assetSelect.title = asset.href;
           download.title = asset.href;
           setDisabled(add, adding || !addable);
+          // A private asset is signed before it opens, so the button says so
+          // by going quiet rather than looking like a dead click.
+          setDisabled(download, signingDownloadKey === key);
           add.title = addReason(item, key, asset);
         };
 
@@ -1274,7 +1347,16 @@ function buildPanel(container: HTMLElement): () => void {
           syncAsset();
           setStatus(labels.adding(assetLabel(key, asset)));
           try {
-            await visualizeAsset(item, key, asset, cogOptions(), controller.signal, target);
+            if (!connection) throw new Error(labels.addFailed);
+            await visualizeAsset(
+              connection,
+              item,
+              key,
+              asset,
+              cogOptions(),
+              controller.signal,
+              target,
+            );
             setStatus(labels.added(assetLabel(key, asset)));
           } catch (error) {
             setStatus(error instanceof Error ? error.message : labels.addFailed, true);
@@ -1283,7 +1365,27 @@ function buildPanel(container: HTMLElement): () => void {
             syncAsset();
           }
         });
-        download.addEventListener("click", () => appRef?.openExternalUrl?.(selected()[1].href));
+        download.addEventListener("click", async () => {
+          const [key, asset] = selected();
+          if (!connection) {
+            setStatus(labels.addFailed, true);
+            return;
+          }
+          signingDownloadKey = key;
+          syncAsset();
+          try {
+            appRef?.openExternalUrl?.(
+              await readableHref(connection, item, asset.href, controller.signal),
+            );
+          } catch (error) {
+            setStatus(error instanceof Error ? error.message : labels.addFailed, true);
+          } finally {
+            // Only this asset's own sign clears the flag: the user may have
+            // moved on and started another one.
+            if (signingDownloadKey === key) signingDownloadKey = null;
+            syncAsset();
+          }
+        });
         syncAsset();
         actions.append(assetSelect, targetSelect, add, download);
       }
@@ -1324,14 +1426,19 @@ function buildPanel(container: HTMLElement): () => void {
     return labels.showing(allItems.length);
   };
 
-  // A double-click means the same here as in the tree: search this one.
-  collectionSelect.addEventListener("dblclick", () => {
+  /** Search the chosen collection and send the map to its extent. */
+  function searchChosenCollection(): void {
     const chosen = collectionSelect.selectedOptions[0]?.value;
     const extent = connection?.collections.find((collection) => collection.id === chosen)?.extent;
     const box = horizontalBbox(extent?.spatial?.bbox?.[0]);
-    void runSearch(false);
+    // The map is only on its way to the collection, so "limit to map extent" would still read the
+    // bounds it is leaving. The collection's own extent stands in for them; a typed bbox still wins.
+    const inView = useExtent.checked && !bboxField.input.value.trim() ? box : undefined;
+    void runSearch(false, undefined, inView);
     if (box) appRef?.fitBounds?.(box);
-  });
+  }
+  // A double-click means the same here as in the tree: search this one.
+  collectionSelect.addEventListener("dblclick", searchChosenCollection);
 
   /** The tree asked for a collection: search it, and send the map to it. */
   function showCollection(href: string, bbox?: [number, number, number, number]): void {
@@ -1356,7 +1463,11 @@ function buildPanel(container: HTMLElement): () => void {
    * The caller may take it first, when it has its own late answer to check; taking it here would
    * mean it moves on a call that does nothing.
    */
-  async function runSearch(append: boolean, generation?: number): Promise<void> {
+  async function runSearch(
+    append: boolean,
+    generation?: number,
+    extent?: [number, number, number, number],
+  ): Promise<void> {
     if (!connection) return;
     const search = generation ?? ++searchGeneration;
 
@@ -1374,7 +1485,7 @@ function buildPanel(container: HTMLElement): () => void {
       walking = new AbortController();
       const reading = AbortSignal.any([walking.signal, controller.signal]);
       const options = {
-        bbox: parseBbox(),
+        bbox: extent ?? parseBbox(),
         datetime,
         collections: selectedCollections,
         entries: connection.isApi ? [] : tree.selection(),
@@ -1421,7 +1532,7 @@ function buildPanel(container: HTMLElement): () => void {
   urlField.input.addEventListener("input", () => {
     if (urlField.input.value !== initialCatalogUrl) presetSelectionPending = false;
   });
-  const connectCatalog = async (): Promise<void> => {
+  const connectCatalog = async (): Promise<StacConnection | undefined> => {
     const url = urlField.input.value.trim();
     setDisabled(connectButton, true);
     setStatus(labels.connecting);
@@ -1449,6 +1560,17 @@ function buildPanel(container: HTMLElement): () => void {
       renderSection.hidden = false;
       clearSearchResults(false);
       setStatus(connection.description || labels.connected);
+      // The URL named one collection of an API: search it, as a double-click on it would.
+      const focus = connection.focusCollection;
+      const focusOption = Array.from(collectionSelect.options).find(
+        (option) => option.value === focus,
+      );
+      if (focusOption) {
+        focusOption.selected = true;
+        focusOption.scrollIntoView?.({ block: "nearest" });
+        searchChosenCollection();
+      }
+      return connection;
     } catch (error) {
       connection = null;
       searchSection.hidden = true;
@@ -1459,7 +1581,7 @@ function buildPanel(container: HTMLElement): () => void {
     }
   };
   connectButton.addEventListener("click", () => void connectCatalog());
-  if (initialCatalogUrl) void connectCatalog();
+  const presetConnection = initialCatalogUrl ? connectCatalog() : undefined;
   searchButton.addEventListener("click", () => void runSearch(false));
   clearResultsButton.addEventListener("click", () => clearSearchResults());
   loadMore.addEventListener("click", () => void runSearch(true));
@@ -1488,48 +1610,58 @@ function buildPanel(container: HTMLElement): () => void {
   clearDrawButton.addEventListener("click", () => {
     bboxField.input.value = "";
     clearDrawButton.hidden = true;
-    const map = appRef?.getMap?.();
+    const map = getStacMap(appRef);
     if (map) removeDrawBox(map);
     setStatus(labels.drawnBboxCleared);
   });
 
   // Clicking a footprint selects the matching result card. The bbox-draw mode
   // owns the pointer while it is active, so both handlers stand down for it.
-  const footprintIdAt = (event: MapMouseEvent): string | null => {
-    const map = appRef?.getMap?.();
+  const footprintIdAt = (event: StacPointerEvent): string | null => {
+    const map = getStacMap(appRef);
     if (!map || cancelDraw) return null;
     const layers = footprintStyleLayers(map);
     if (!layers.length) return null;
-    const feature = map.queryRenderedFeatures(event.point, { layers })[0];
+    const feature = map.queryRenderedFeatures([event.point.x, event.point.y], { layers })[0];
     const id = feature?.properties?.id;
     return typeof id === "string" ? id : null;
   };
-  const onMapClick = (event: MapMouseEvent): void => {
+  const onMapClick = (event: StacPointerEvent): void => {
     const id = footprintIdAt(event);
     if (id) selectItem(id, true);
   };
-  const onMapMove = (event: MapMouseEvent): void => {
-    const map = appRef?.getMap?.();
+  const onMapMove = (event: StacPointerEvent): void => {
+    const map = getStacMap(appRef);
     if (!map || cancelDraw) return;
     map.getCanvas().style.cursor = footprintIdAt(event) ? "pointer" : "";
   };
-  const map = appRef?.getMap?.();
+  const map = getStacMap(appRef);
   map?.on("click", onMapClick);
   map?.on("mousemove", onMapMove);
 
-  void loadStacIndex(fetch, controller.signal).then(
+  const loadIndex = browserOptions.loadIndex ?? loadStacIndex;
+  const indexFromConnection = browserOptions.indexFromConnection;
+  // Portolan's preset and discovery list are the same document. Reuse the initial
+  // connection, retaining URL entry and a separate retry if that connection failed.
+  const indexRequest =
+    presetConnection && indexFromConnection
+      ? presetConnection.then((opened) =>
+          opened ? indexFromConnection(opened) : loadIndex(fetch, controller.signal),
+        )
+      : loadIndex(fetch, controller.signal);
+  void indexRequest.then(
     (catalogs) => {
       index = catalogs;
       renderCatalogs();
     },
     (error) => {
       catalogSelect.innerHTML = "";
-      catalogSelect.append(el("option", labels.indexUnavailable));
+      catalogSelect.append(el("option", indexLabels.indexUnavailable));
       // A preset catalog connects in parallel with this index fetch, so a late
       // index failure must not overwrite a connection that already succeeded —
       // the catalog is usable, only the browse-by-name dropdown is not.
       if (!connection) {
-        setStatus(error instanceof Error ? error.message : labels.indexLoadFailed, true);
+        setStatus(error instanceof Error ? error.message : indexLabels.indexLoadFailed, true);
       }
     },
   );
@@ -1540,7 +1672,7 @@ function buildPanel(container: HTMLElement): () => void {
     searchGeneration += 1;
     // The footprints are the user's layer now, so closing the panel leaves them
     // on the map; only deactivating the plugin tears them down.
-    const activeMap = appRef?.getMap?.();
+    const activeMap = getStacMap(appRef);
     if (activeMap) {
       activeMap.off("click", onMapClick);
       activeMap.off("mousemove", onMapMove);
@@ -1557,22 +1689,69 @@ function mountPanel(container: HTMLElement): void {
   disposePanel = buildPanel(container);
 }
 
-function createStacPlugin(id: string, name: string, presetCatalogUrl = ""): GeoLibrePlugin {
+/** Drop a {@link requestStacCatalogUrl} request no activation took up. */
+export function cancelStacCatalogRequest(): void {
+  requestedCatalogUrl = "";
+}
+
+/**
+ * Open the STAC Catalogs browser on a catalog, API, or API collection URL and connect to it.
+ *
+ * Takes effect on the STAC Catalogs plugin's next activation, or at once when it is already active.
+ *
+ * Args:
+ *   url: The STAC URL to connect to.
+ */
+export function requestStacCatalogUrl(url: string): void {
+  // Only the STAC Catalogs browser takes the request in place. A sibling's (Planet, Portolan) state
+  // is left for the activation that replaces it, which reads the request.
+  if (activePluginId !== STAC_PLUGIN_ID) {
+    requestedCatalogUrl = url;
+    return;
+  }
+  initialCatalogUrl = url;
+  if (panelContainer) mountPanel(panelContainer);
+  // Active with its panel closed: opening the panel mounts it on the requested catalog.
+  else appRef?.openRightPanel?.(STAC_PLUGIN_ID);
+}
+
+/**
+ * Factory creating a STAC catalog browser plugin instance with optional preset catalog URL.
+ *
+ * @param id - Unique plugin identifier.
+ * @param name - Display name for the plugin.
+ * @param presetCatalogUrl - Optional default catalog URL to connect to on load.
+ * @returns A {@link GeoLibrePlugin} instance for browsing STAC catalogs.
+ */
+function createStacPlugin(
+  id: string,
+  name: string,
+  presetCatalogUrl = "",
+  options: CatalogBrowserOptions = {},
+): GeoLibrePlugin {
   return {
     id,
     name,
     version: "0.1.0",
+    // Footprints and interaction use the shared native GeoJSON APIs.
+    engines: ["maplibre", "mapbox"],
     exclusiveGroup: "stac-catalog-browser",
     activate(app) {
-      initialCatalogUrl = presetCatalogUrl;
+      // The `?stac=` request is for the STAC Catalogs browser, never a sibling preset.
+      initialCatalogUrl = (id === STAC_PLUGIN_ID && requestedCatalogUrl) || presetCatalogUrl;
+      if (id === STAC_PLUGIN_ID) requestedCatalogUrl = "";
+      activePluginId = id;
+      browserOptions = options;
       appRef = app;
       unregisterPanel =
         app.registerRightPanel?.({
           id,
           title: () =>
-            presetCatalogUrl
+            id === PLANET_OPEN_DATA_PLUGIN_ID
               ? (labels.getPlanetTitle?.() ?? labels.planetTitle)
-              : (labels.getTitle?.() ?? labels.title),
+              : id === STAC_PLUGIN_ID
+                ? (labels.getTitle?.() ?? labels.title)
+                : name,
           dock: "replace-style",
           defaultWidth: 380,
           render(container) {
@@ -1591,13 +1770,15 @@ function createStacPlugin(id: string, name: string, presetCatalogUrl = ""): GeoL
       unregisterPanel?.();
       unregisterPanel = null;
       removeFootprints();
-      const map = app.getMap?.();
+      const map = getStacMap(app);
       if (map) {
         removeDrawBox(map);
         removeSelectionHighlight(map);
       }
       appRef = null;
+      activePluginId = null;
       initialCatalogUrl = "";
+      browserOptions = {};
     },
   };
 }
@@ -1609,6 +1790,35 @@ export const maplibrePlanetOpenDataPlugin = createStacPlugin(
   PLANET_OPEN_DATA_PLUGIN_ID,
   "Planet Open Data",
   PLANET_DISASTER_DATA_CATALOG_URL,
+);
+
+/** Browse registered Portolan catalogs or connect directly to a publisher's URL. */
+export const maplibrePortolanPlugin = createStacPlugin(
+  PORTOLAN_PLUGIN_ID,
+  "Portolan",
+  PORTOLAN_REGISTRY_URL,
+  {
+    loadIndex: loadPortolanIndex,
+    indexFromConnection: (connection) => portolanIndexFromDocument(connection.root),
+    indexLabels: (app) => ({
+      indexLoading:
+        app.translate?.("stacPlugin.portolanIndexLoading", "Loading Portolan Registry…") ??
+        "Loading Portolan Registry…",
+      indexUnavailable:
+        app.translate?.(
+          "stacPlugin.portolanIndexUnavailable",
+          "Portolan Registry unavailable: enter a URL",
+        ) ?? "Portolan Registry unavailable: enter a URL",
+      indexLoadFailed:
+        app.translate?.("stacPlugin.portolanIndexLoadFailed", "Could not load Portolan Registry") ??
+        "Could not load Portolan Registry",
+    }),
+    catalogSearchLabel: (app) =>
+      app.translate?.(
+        "stacPlugin.portolanCatalogSearch",
+        "Find a public catalog from Portolan Registry",
+      ) ?? "Find a public catalog from Portolan Registry",
+  },
 );
 
 export default maplibreStacCatalogsPlugin;

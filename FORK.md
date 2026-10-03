@@ -15,7 +15,7 @@ agent — follows it.*
 
 ## 1. The model: merge-based soft fork
 
-- `upstream` remote → opengeos/GeoLibre; `origin` → DynamikOrbits/dynamik-studio.
+- `upstream` remote → opengeos/GeoLibre; `origin` → DynamikOrbits/geospatial-studio.
 - We periodically **merge** upstream into our `main`
   (`git fetch upstream && git merge upstream/main`), we never rebase published
   history.

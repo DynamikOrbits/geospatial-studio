@@ -1,5 +1,5 @@
 import type { ConversionToolKind, RasterToolKind, VectorToolKind } from "@geolibre/core";
-import { type BuiltInMapControl, type MapController } from "@geolibre/map";
+import { type BuiltInMapControl, type MapEngine } from "@geolibre/map";
 import type { GeoLibreMapControlPosition } from "@geolibre/plugins";
 import type { ParseKeys } from "i18next";
 import {
@@ -13,8 +13,8 @@ import type { AddDataKind } from "../AddDataDialog";
 /** The live app API surface plugins and panels are driven through. */
 export type AppApi = ReturnType<typeof createAppAPI>;
 
-/** A ref to the live MapController, shared across the toolbar pieces. */
-export type MapControllerRef = React.RefObject<MapController | null>;
+/** A ref to the live map engine, shared across the toolbar pieces. */
+export type MapControllerRef = React.RefObject<MapEngine | null>;
 
 /** Built-in map controls that the Controls menu can toggle (all but the layer control). */
 export type ToolbarMapControl = Exclude<BuiltInMapControl, "layer-control">;
@@ -40,7 +40,6 @@ export interface AddLayerHandlers {
 /** Shared styling/affordances passed to each toolbar menu's trigger button. */
 export interface ToolbarChrome {
   buttonClass: string;
-  secondaryButtonClass: string;
   buttonSize: "icon" | "sm";
   iconClassName: string;
   renderLabel: (label: string) => React.ReactNode;
@@ -109,6 +108,7 @@ export const ADD_DATA_KIND_COMMANDS: Array<{
   { kind: "delimited-text", titleKey: "toolbar.layerType.delimitedText" },
   { kind: "cad", titleKey: "toolbar.item.cadLayer" },
   { kind: "gpx", titleKey: "toolbar.layerType.gpx" },
+  { kind: "landxml", titleKey: "toolbar.layerType.landxml" },
   { kind: "mbtiles", titleKey: "toolbar.layerType.mbtiles" },
   { kind: "xyz", titleKey: "toolbar.layerType.xyz" },
   { kind: "wms", titleKey: "toolbar.layerType.wms" },

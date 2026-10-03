@@ -1,8 +1,9 @@
 import { useAppStore, type MapProjection, type MapViewState } from "@geolibre/core";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { dataUrlParameters, serviceUrlParameter } from "../lib/data-url";
+import { dataUrlParameters, serviceUrlParameter, stacUrlParameter } from "../lib/data-url";
 import { isTauri } from "../lib/is-tauri";
+import { isViewerLayout } from "./useLayoutOptions";
 import { projectUrlFromLocation } from "../lib/project-url";
 import { planStartup, startupDefaultWorkspace, type StartupPlan } from "../lib/startup-project";
 import { openRecentProjectFile, RecentProjectGoneError } from "../lib/tauri-io";
@@ -11,6 +12,11 @@ import { DEFAULT_STARTUP_SETTINGS, useDesktopSettingsStore } from "./useDesktopS
 import { loadRecentProjects } from "./useRecentProjectsPersistence";
 import { consumeInlineProjectFragment } from "../lib/inline-project-fragment";
 import { initialNativeProjectPath } from "../lib/native-project-open";
+import { coordinateTargetFromSearch } from "../lib/coordinate-url";
+import {
+  initialNativeCoordinateTarget,
+  finishNativeCoordinateStartup,
+} from "../lib/native-coordinate-open";
 
 /**
  * How long the shell stays unmounted waiting for a startup restore. The read and
@@ -39,6 +45,10 @@ function hasExplicitLaunchPayload(): boolean {
   if (projectUrlFromLocation() !== null) return true;
   if (dataUrlParameters(window.location.search) !== null) return true;
   if (serviceUrlParameter(window.location.search) !== null) return true;
+  // A read-only viewer ignores `?stac=` (see `useStacUrlLoader`), so it must not
+  // keep the startup project from loading either.
+  if (!isViewerLayout(window.location.search) && stacUrlParameter(window.location.search) !== null)
+    return true;
   return false;
 }
 
@@ -122,13 +132,32 @@ export function useStartupProject(): {
       useAppStore.getState().loadProject(inlineProject, null, { rememberRecent: false });
       return false;
     }
+    const location =
+      initialNativeCoordinateTarget() ?? coordinateTargetFromSearch(window.location.search);
+    if (location && !hasExplicitLaunchPayload() && !openedProjectPath) {
+      applyDefaultWorkspace({
+        ...startupDefaultWorkspace(useDesktopSettingsStore.getState().desktopSettings.startup),
+        ...location,
+      });
+      return false;
+    }
     const plan = currentStartupPlan(openedProjectPath);
     if (plan.kind === "default") applyDefaultWorkspace(plan);
     return plan.kind === "restore";
   });
 
+  // End native startup in the same synchronous render that reads its target.
+  // Waiting for the passive effect would drop intents received after render.
+  finishNativeCoordinateStartup();
+
   useEffect(() => {
     if (inlineProject) return;
+    if (
+      (initialNativeCoordinateTarget() || coordinateTargetFromSearch(window.location.search)) &&
+      !hasExplicitLaunchPayload() &&
+      !openedProjectPath
+    )
+      return;
     const plan = currentStartupPlan(openedProjectPath);
     // Both other cases were settled by the initializer above.
     if (plan.kind !== "restore") return;

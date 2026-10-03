@@ -7,8 +7,9 @@ import {
   type ModelGraphNodeKind,
   type ProcessingModel,
   type ProcessingModelGraph,
+  useLayersWhen,
 } from "@geolibre/core";
-import type { MapController } from "@geolibre/map";
+import type { MapEngine } from "@geolibre/map";
 import {
   VECTOR_TOOLS,
   fetchRemoteWhiteboxCatalogSnapshot,
@@ -254,7 +255,7 @@ function portPosition(
 }
 
 interface ModelBuilderPanelProps {
-  mapControllerRef: React.RefObject<MapController | null>;
+  mapControllerRef: React.RefObject<MapEngine | null>;
   /** Adds a raster result (COG bytes) to the map, when the host supports it. */
   onAddRaster?: (bytes: Uint8Array, name: string, fileName: string) => Promise<void> | void;
 }
@@ -273,7 +274,9 @@ export function ModelBuilderPanel({
   const requestedModelId = useAppStore((s) => s.ui.modelBuilderRequestedModelId);
   const setOpen = useAppStore((s) => s.setModelBuilderOpen);
   const setRequestedModelId = useAppStore((s) => s.setModelBuilderRequestedModelId);
-  const layers = useAppStore((s) => s.layers);
+  // Layers are only read while the panel is open (it stays mounted closed to
+  // keep the model on the canvas).
+  const layers = useLayersWhen(open);
   const savedModels = useAppStore((s) => s.models);
   const saveModel = useAppStore((s) => s.saveModel);
   const deleteModel = useAppStore((s) => s.deleteModel);

@@ -25,6 +25,89 @@ import { getPlanetaryBasemapByStyleUrl } from "./ellipsoids";
 import { getRegionalBasemapByStyleUrl } from "./regional-basemaps";
 import { BLANK_BASEMAP, DEFAULT_BASEMAP } from "./types";
 
+/** Stable project IDs and the corresponding Cesium bundled thumbnails / ion assets. */
+export const CESIUM_BASEMAPS = [
+  { id: "project", name: "Project basemap", icon: "naturalEarthII.png" },
+  { id: "natural-earth", name: "Natural Earth II", icon: "naturalEarthII.png" },
+  { id: "bing-aerial", name: "Bing Maps Aerial", icon: "bingAerial.png", assetId: 2 },
+  {
+    id: "bing-labels",
+    name: "Bing Maps Aerial with Labels",
+    icon: "bingAerialLabels.png",
+    assetId: 3,
+  },
+  { id: "bing-roads", name: "Bing Maps Roads", icon: "bingRoads.png", assetId: 4 },
+  { id: "sentinel-2", name: "Sentinel-2", icon: "sentinel-2.png", assetId: 3954 },
+  { id: "blue-marble", name: "Blue Marble", icon: "blueMarble.png", assetId: 3845 },
+  { id: "earth-at-night", name: "Earth at night", icon: "earthAtNight.png", assetId: 3812 },
+  {
+    id: "google-satellite",
+    name: "Google Maps Satellite",
+    icon: "googleSatellite.png",
+    assetId: 3830182,
+  },
+  {
+    id: "google-labels",
+    name: "Google Maps Satellite with Labels",
+    icon: "googleSatelliteLabels.png",
+    assetId: 3830183,
+  },
+  { id: "google-roads", name: "Google Maps Roadmap", icon: "googleRoadmap.png", assetId: 3830184 },
+  {
+    id: "google-contour",
+    name: "Google Maps Contour",
+    icon: "googleContour.png",
+    assetId: 3830186,
+  },
+  { id: "azure-aerial", name: "Azure Maps Aerial", icon: "azureAerial.png", assetId: 3891168 },
+  { id: "azure-roads", name: "Azure Maps Roads", icon: "azureRoads.png", assetId: 3891169 },
+  {
+    id: "esri-imagery",
+    name: "ArcGIS World Imagery",
+    icon: "ArcGisMapServiceWorldImagery.png",
+    category: "Other",
+    service: "World_Imagery",
+  },
+  {
+    id: "esri-hillshade",
+    name: "ArcGIS World Hillshade",
+    icon: "ArcGisMapServiceWorldHillshade.png",
+    category: "Other",
+    service: "Elevation/World_Hillshade",
+  },
+  {
+    id: "esri-ocean",
+    name: "Esri World Ocean",
+    icon: "ArcGisMapServiceWorldOcean.png",
+    category: "Other",
+    service: "Ocean/World_Ocean_Base",
+  },
+  { id: "osm", name: "OpenStreetMap", icon: "openStreetMap.png", category: "Other" },
+] as const;
+
+export type CesiumBasemapId = (typeof CESIUM_BASEMAPS)[number]["id"];
+
+export function normalizeCesiumBasemap(value: unknown): CesiumBasemapId {
+  return CESIUM_BASEMAPS.find((entry) => entry.id === value)?.id ?? "project";
+}
+
+/**
+ * Missing credentials fall back to keyless imagery without changing the saved
+ * choice.
+ *
+ * The fallback is ArcGIS World Imagery rather than the project background: a
+ * globe wants to look like the Earth, and the project's own basemap is usually
+ * a vector street style whose raster analogue is mostly empty ocean from
+ * orbit. It needs no key, so the globe looks the same with or without an Ion
+ * token — only terrain and the Ion-only basemaps are lost.
+ */
+export function availableCesiumBasemap(value: unknown, hasIonToken: boolean): CesiumBasemapId {
+  const keyless = "esri-imagery";
+  const requested = value ?? (hasIonToken ? "bing-aerial" : keyless);
+  const entry = CESIUM_BASEMAPS.find((entry) => entry.id === requested);
+  return entry && (!("assetId" in entry) || hasIonToken) ? entry.id : keyless;
+}
+
 /**
  * What the globe should draw underneath the project's data layers.
  *
@@ -39,6 +122,9 @@ import { BLANK_BASEMAP, DEFAULT_BASEMAP } from "./types";
 export type CesiumBasemapImagery =
   | { kind: "none" }
   | { kind: "default" }
+  | { kind: "ion"; assetId: number }
+  | { kind: "natural-earth" }
+  | { kind: "arcgis"; url: string }
   | {
       kind: "xyz";
       /** Tile template with `{z}`/`{x}`/`{y}` placeholders. */
@@ -154,6 +240,8 @@ function toImagery(analogue: RasterAnalogue): CesiumBasemapImagery {
  */
 export function sameCesiumImagery(a: CesiumBasemapImagery, b: CesiumBasemapImagery): boolean {
   if (a.kind !== b.kind) return false;
+  if (a.kind === "arcgis" && b.kind === "arcgis") return a.url === b.url;
+  if (a.kind === "ion" && b.kind === "ion") return a.assetId === b.assetId;
   // `none` and `default` carry no fields, so matching kinds is the whole test.
   if (a.kind !== "xyz" || b.kind !== "xyz") return true;
   return (
@@ -225,7 +313,20 @@ function vectorStyleAnalogue(styleUrl: string): RasterAnalogue | undefined {
  * @param styleUrl - The project's `basemapStyleUrl`.
  * @returns What the globe should draw beneath the data layers.
  */
-export function basemapToCesiumImagery(styleUrl: string | undefined): CesiumBasemapImagery {
+export function basemapToCesiumImagery(
+  styleUrl: string | undefined,
+  cesiumBasemap: CesiumBasemapId = "project",
+): CesiumBasemapImagery {
+  const entry = CESIUM_BASEMAPS.find((entry) => entry.id === cesiumBasemap);
+  if (entry && "service" in entry) {
+    return {
+      kind: "arcgis",
+      url: `https://services.arcgisonline.com/ArcGIS/rest/services/${entry.service}/MapServer`,
+    };
+  }
+  if (entry && "assetId" in entry) return { kind: "ion", assetId: entry.assetId };
+  if (cesiumBasemap === "natural-earth") return { kind: "natural-earth" };
+  if (cesiumBasemap === "osm") return toImagery(STREETS);
   if (styleUrl === BLANK_BASEMAP) return { kind: "none" };
   const url = styleUrl ?? DEFAULT_BASEMAP;
 

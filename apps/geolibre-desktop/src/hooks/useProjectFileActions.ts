@@ -18,6 +18,7 @@ import {
 } from "@geolibre/plugins";
 import type { FeatureCollection } from "geojson";
 import { type FormEvent, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { embedEditedGeometry, hasEditedGeometry } from "../lib/edited-geometry-save";
 import { useTranslation } from "react-i18next";
 import { createAppAPI, getPluginManager } from "./usePlugins";
 import { pluginManifestUrlsForIds } from "../lib/external-plugins";
@@ -43,7 +44,20 @@ import { ensureHtmlFileName, ensureProjectFileName } from "../lib/file-names";
 import { mergeStringLists } from "../lib/string-lists";
 import { fetchProjectFromUrl } from "../lib/project-url";
 import { getShareFetch } from "../lib/share-fetch";
-import { resolveShareBaseUrl } from "../lib/share-geolibre";
+import {
+  resolveShareBaseUrl,
+  sharedProjectContentMatches,
+  shareHostLabel,
+  ShareUploadError,
+  updateSharedProjectContent,
+} from "../lib/share-geolibre";
+import {
+  resolveShareRequestToken,
+  ShareOAuthError,
+  shareOAuthErrorKey,
+  supportsShareOAuth,
+  useShareOAuthStore,
+} from "../lib/share-oauth";
 import { shareAuthorizedFetch } from "../lib/share-gallery";
 import { normalizeProjectUrl } from "../lib/urls";
 import { recordExplicitProjectSave } from "../lib/project-history-session";
@@ -122,6 +136,8 @@ const SERIALIZATION_TOO_LARGE_PATTERN =
  * otherwise be lost on reopen (the browser exposes no path to re-read them).
  */
 export interface EmbedVectorDataPrompt {
+  /** Whether saving references would lose committed geometry edits. */
+  hasGeometryEdits: boolean;
   /** Number of local-file vector layers that can be embedded. */
   count: number;
   /** Total embedded size in bytes, for the size warning. */
@@ -157,6 +173,15 @@ export interface SaveNamePrompt {
   label: string;
   /** Placeholder for the file-name input. */
   placeholder: string;
+}
+
+export interface RemoteSharedProjectTarget {
+  id: string;
+  versionCount: number;
+  canEdit: boolean;
+  token: string;
+  baseUrl: string;
+  oauthSessionRevision?: number;
 }
 
 /**
@@ -301,6 +326,9 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
   );
   const [saveNamePrompt, setSaveNamePrompt] = useState<SaveNamePrompt | null>(null);
   const [saveNameInput, setSaveNameInput] = useState("");
+  const [remoteSaveWarning, setRemoteSaveWarning] = useState<RemoteSharedProjectTarget | null>(
+    null,
+  );
   const projectUrlAbortRef = useRef<AbortController | null>(null);
   const recentAbortRef = useRef<AbortController | null>(null);
   // Separate from projectUrlAbortRef so a gallery open and an Open-from-URL
@@ -314,6 +342,25 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
   // dialog is open would overwrite the pending prompt and strand the first
   // call's unresolved promise.
   const isSavingRef = useRef(false);
+  const remoteProjectRef = useRef<
+    (RemoteSharedProjectTarget & { projectGeneration: number }) | null
+  >(null);
+  // Do not keep a remote edit target after its OAuth project session changes.
+  // The loaded map remains available for a local Save As.
+  useLayoutEffect(
+    () =>
+      useShareOAuthStore.subscribe((state) => {
+        const target = remoteProjectRef.current;
+        if (
+          target?.oauthSessionRevision !== undefined &&
+          target.oauthSessionRevision !== state.sessionRevision
+        ) {
+          remoteProjectRef.current = null;
+          setRemoteSaveWarning(null);
+        }
+      }),
+    [],
+  );
 
   // Settling a prompt means resolving its promise and clearing the dialog
   // state. Each pattern lives here once so the dialog handlers further down and
@@ -347,6 +394,13 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
   // useLayoutEffect (not useEffect) so the stale dialog is gone in the same
   // commit that swapped the project, rather than lingering for one paint.
   useLayoutEffect(() => {
+    if (
+      remoteProjectRef.current &&
+      remoteProjectRef.current.projectGeneration !== projectGeneration
+    ) {
+      remoteProjectRef.current = null;
+      setRemoteSaveWarning(null);
+    }
     if (credentialStripPrompt && credentialStripPrompt.projectGeneration !== projectGeneration) {
       settleCredentialStripPrompt(credentialStripPrompt, "cancel");
     }
@@ -617,14 +671,20 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
         for (const layer of imported.project.layers) {
           if (layer.sourcePath && !isHttpUrl(layer.sourcePath)) {
             unavailableLayerIds.add(layer.id);
-            imported.warnings.push({ layerName: layer.name, reason: "browser-local-file" });
+            imported.warnings.push({
+              layerName: layer.name,
+              reason: "browser-local-file",
+            });
           }
         }
         imported.project.layers = imported.project.layers.filter(
           (layer) => !unavailableLayerIds.has(layer.id),
         );
         for (const raster of imported.rasters) {
-          imported.warnings.push({ layerName: raster.name, reason: "browser-local-file" });
+          imported.warnings.push({
+            layerName: raster.name,
+            reason: "browser-local-file",
+          });
         }
         // Rasters never load in the browser build, so drop them before the
         // group prune below rather than letting them keep a group alive that
@@ -681,7 +741,10 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
             );
           } catch (error) {
             console.error(`Failed to import ArcGIS raster "${raster.name}"`, error);
-            imported.warnings.push({ layerName: raster.name, reason: "format" });
+            imported.warnings.push({
+              layerName: raster.name,
+              reason: "format",
+            });
           }
         }
       }
@@ -705,7 +768,10 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
           }
         } catch (error) {
           console.error(`Failed to import ArcGIS service "${service.name}"`, error);
-          imported.warnings.push({ layerName: service.name, reason: "service" });
+          imported.warnings.push({
+            layerName: service.name,
+            reason: "service",
+          });
         }
       }
       useAppStore.setState({ isDirty: true });
@@ -772,7 +838,12 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
 
   const openProjectFromShareUrl = async (
     url: string,
-    options: { authToken?: string; asCopy?: boolean } = {},
+    options: {
+      authToken?: string;
+      asCopy?: boolean;
+      oauthSessionRevision?: number;
+      remoteProject?: RemoteSharedProjectTarget;
+    } = {},
   ): Promise<void> => {
     const normalizedUrl = normalizeProjectUrl(url);
     if (!normalizedUrl) {
@@ -805,14 +876,25 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       }
 
       if (controller.signal.aborted) return;
+      if (
+        options.oauthSessionRevision !== undefined &&
+        options.oauthSessionRevision !== useShareOAuthStore.getState().sessionRevision
+      )
+        return;
 
       if (options.asCopy) {
         const detached = detachProjectCopy(project, { nameSuffix: "" });
         loadProject(detached, null);
+        remoteProjectRef.current = null;
         useAppStore.setState({ isDirty: true });
       } else {
         loadProject(project, shareAuth ? null : normalizedUrl);
+        const generation = useAppStore.getState().projectGeneration;
+        remoteProjectRef.current = options.remoteProject
+          ? { ...options.remoteProject, projectGeneration: generation }
+          : null;
       }
+      setRemoteSaveWarning(null);
     } finally {
       if (shareUrlAbortRef.current === controller) {
         shareUrlAbortRef.current = null;
@@ -922,6 +1004,7 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       mapLayout: state.mapLayout,
       secondaryMapViews: state.secondaryMapViews,
       primaryMapLabel: state.primaryMapLabel,
+      primaryRenderer: state.primaryRenderer,
       styleLibrary: state.projectStyleLibrary,
       comments: state.comments,
       metadata: state.metadata,
@@ -969,7 +1052,11 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
   // picks an option in the dialog.
   const askStripCredentials = (count: number, promptProjectGeneration: number) =>
     new Promise<"strip" | "keep" | "cancel">((resolve) => {
-      setCredentialStripPrompt({ count, projectGeneration: promptProjectGeneration, resolve });
+      setCredentialStripPrompt({
+        count,
+        projectGeneration: promptProjectGeneration,
+        resolve,
+      });
     });
 
   const resolveCredentialStripPrompt = (choice: "strip" | "keep" | "cancel") =>
@@ -982,10 +1069,12 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
     bytes: number,
     desktop: boolean,
     promptProjectGeneration: number,
+    hasGeometryEdits: boolean,
   ) =>
     new Promise<"embed" | "noembed" | "cancel">((resolve) => {
       setEmbedVectorDataPrompt({
         count,
+        hasGeometryEdits,
         bytes,
         desktop,
         allowFileReferences: canSaveVectorFileReferences(desktop, IS_MAS_BUILD),
@@ -1020,6 +1109,7 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       }
     }
     return layers.map((layer) => {
+      if (hasEditedGeometry(layer)) return embedEditedGeometry(layer);
       let metadata = layer.metadata;
       const collection = embeddable.get(layer.id);
       if (collection) metadata = { ...metadata, embeddedGeoJSON: collection };
@@ -1044,7 +1134,7 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       bytes += encoder.encode(JSON.stringify(collection)).length;
     }
     for (const layer of layers) {
-      if (isReloadableLocalFileLayer(layer) && layer.geojson) {
+      if (!embeddable.has(layer.id) && isReloadableLocalFileLayer(layer) && layer.geojson) {
         bytes += encoder.encode(JSON.stringify(layer.geojson)).length;
       }
     }
@@ -1064,7 +1154,13 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
     const state = useAppStore.getState();
     const embeddable = await materializeEmbeddableVectorLayers(state.layers);
     if (useAppStore.getState().projectGeneration !== state.projectGeneration) return "cancel";
-    const localFileLayers = isTauri() ? state.layers.filter(isReloadableLocalFileLayer) : [];
+    const editedLayers = state.layers.filter(hasEditedGeometry);
+    for (const layer of editedLayers) embeddable.set(layer.id, layer.geojson!);
+    const localFileLayers = isTauri()
+      ? state.layers.filter(
+          (layer) => isReloadableLocalFileLayer(layer) && !embeddable.has(layer.id),
+        )
+      : [];
     if (embeddable.size === 0 && localFileLayers.length === 0) return {};
 
     const count = embeddable.size + localFileLayers.length;
@@ -1076,13 +1172,16 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
     // size that was acknowledged. A remembered Save without data stays silent
     // only for the layers whose data the user accepted losing. Both are
     // material risks that deserve a fresh confirmation even though the ordinary
-    // per-project choice is remembered. On desktop that second case cannot
-    // arise: "without data" writes file references, so nothing is discarded.
-    const discardedLayerIds = isTauri() ? [] : [...embeddable.keys()];
+    // per-project choice is remembered. Geometry edits also need embedding on
+    // desktop: file references would reload the original geometries.
+    const discardedLayerIds = isTauri()
+      ? editedLayers.map((layer) => layer.id)
+      : [...embeddable.keys()];
     const reusableChoice = reusableVectorDataChoice(remembered, {
       embedBytes: bytes,
       warningBytes: LARGE_EMBED_WARNING_BYTES,
       discardedLayerIds,
+      editedLayerIds: editedLayers.map((layer) => layer.id),
     });
     // A remembered choice the durability guard below would have to override is
     // not reusable: silently upgrading it to Embed would skip the prompt, and
@@ -1095,7 +1194,13 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
         : reusableChoice;
     const requestedChoice =
       rememberedVectorChoice ??
-      (await askEmbedVectorData(count, bytes, isTauri(), state.projectGeneration));
+      (await askEmbedVectorData(
+        count,
+        bytes,
+        isTauri(),
+        state.projectGeneration,
+        editedLayers.length > 0,
+      ));
     // A Mac App Store app receives temporary access to user-selected files.
     // That access expires when the sandboxed process exits, so a path-only
     // project cannot restore its local vectors after the next launch. Embed is
@@ -1143,6 +1248,7 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
     if (!isTauri()) return {};
     let changed = false;
     const layers = useAppStore.getState().layers.map((layer) => {
+      if (hasEditedGeometry(layer) && !isReloadableLocalFileLayer(layer)) return layer;
       // Plain GeoJSON with an absolute path → reference (drop the embedded copy).
       if (isReloadableLocalFileLayer(layer)) {
         changed = true;
@@ -1187,7 +1293,11 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
   ) =>
     new Promise<string | null>((resolve) => {
       setSaveNameInput(defaultName);
-      setSaveNamePrompt({ projectGeneration: promptProjectGeneration, resolve, ...labels });
+      setSaveNamePrompt({
+        projectGeneration: promptProjectGeneration,
+        resolve,
+        ...labels,
+      });
     });
 
   const submitSaveNamePrompt = (event?: FormEvent<HTMLFormElement>) => {
@@ -1248,6 +1358,69 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       contentToSave = serializeForSave(projectToEgress);
     }
     if (contentToSave === null) return false;
+    const remoteProject = remoteProjectRef.current;
+    if (
+      !options?.saveAs &&
+      remoteProject?.canEdit &&
+      remoteProject.projectGeneration === saveProjectGeneration
+    ) {
+      try {
+        // Re-resolved per save: an OAuth access token captured at open time
+        // may have expired; `remoteProject.token` is the personal-token fallback.
+        const token = await resolveShareRequestToken(remoteProject.token, remoteProject.baseUrl);
+        if (
+          remoteProject !== remoteProjectRef.current ||
+          (remoteProject.oauthSessionRevision !== undefined &&
+            remoteProject.oauthSessionRevision !== useShareOAuthStore.getState().sessionRevision)
+        )
+          return false;
+        const updated = await updateSharedProjectContent({
+          token,
+          projectId: remoteProject.id,
+          content: contentToSave,
+          expectedVersion: remoteProject.versionCount,
+          baseUrl: remoteProject.baseUrl,
+        });
+        if (
+          useAppStore.getState().projectGeneration !== saveProjectGeneration ||
+          remoteProject !== remoteProjectRef.current ||
+          (remoteProject.oauthSessionRevision !== undefined &&
+            remoteProject.oauthSessionRevision !== useShareOAuthStore.getState().sessionRevision)
+        )
+          return false;
+        const updatedRemoteProject = {
+          ...remoteProject,
+          versionCount: updated.versionCount,
+        };
+        remoteProjectRef.current = updatedRemoteProject;
+
+        const liveProject = excludeHiddenFieldsFromProject(buildCurrentProject().project);
+        const liveContent = serializeForSave(liveProject);
+        if (liveContent && sharedProjectContentMatches(updated.savedContent, liveContent)) {
+          markSaved();
+          recordExplicitProjectSave();
+        }
+        setRemoteSaveWarning(updated.warning ? updatedRemoteProject : null);
+        return true;
+      } catch (error) {
+        console.error("Failed to update shared project", error);
+        setActionError(
+          error instanceof ShareOAuthError
+            ? t(shareOAuthErrorKey(error.code))
+            : error instanceof ShareUploadError && error.code === "unauthorized"
+              ? t(
+                  supportsShareOAuth()
+                    ? "gallery.errorUnauthorizedOAuth"
+                    : "gallery.errorUnauthorized",
+                  { shareHost: shareHostLabel() },
+                )
+              : error instanceof Error
+                ? error.message
+                : t("toolbar.error.couldNotSaveProject"),
+        );
+        return false;
+      }
+    }
     // Projects opened from a URL have no writable path, so both Save and
     // Save As fall back to the save dialog for them.
     const existingLocalPath = projectPath && !isHttpUrl(projectPath) ? projectPath : null;
@@ -1442,6 +1615,8 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
     setQgisImportWarnings,
     arcgisImportWarnings,
     setArcgisImportWarnings,
+    remoteSaveWarning,
+    clearRemoteSaveWarning: () => setRemoteSaveWarning(null),
     projectUrlDialogOpen,
     setProjectUrlDialogOpen,
     handleProjectUrlDialogOpenChange,
