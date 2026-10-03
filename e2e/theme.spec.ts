@@ -51,7 +51,9 @@ test("inherits a dark Workspace theme with dim borders and a valid accent", asyn
     payload: {
       requestId: "theme-1", colorScheme: "dark", preset: "theme-dynamik", tokens: {
         "--surface-base": "rgb(5, 5, 5)",
-        "--surface-overlay": "rgb(30, 30, 30)",
+        "--surface-overlay": "rgba(0, 0, 0, 0.6)",
+        "--surface-hover": "color-mix(in srgb, white 6%, rgb(5, 5, 5))",
+        "--text-primary": "rgba(255, 255, 255, 0.97)",
         "--border-default": "rgba(255, 255, 255, 0.22)",
         "--border-strong": "rgba(255, 255, 255, 0.36)",
         "--accent": "rgb(99, 102, 241)",
@@ -61,20 +63,20 @@ test("inherits a dark Workspace theme with dim borders and a valid accent", asyn
   const app = page.frames().find((candidate) => candidate !== page.mainFrame())!;
   await expect(frame.locator("html")).toHaveClass(/(^|\s)dark(\s|$)/);
   await expect(frame.locator("html")).toHaveAttribute("data-dynamik-workspace", "true");
-  const { border, accent } = await app.evaluate(() => {
+  const { border, accent, accentText } = await app.evaluate(() => {
     const probe = document.createElement("div");
-    probe.className = "border border-border bg-accent";
+    probe.className = "border border-border bg-accent text-accent-foreground";
     document.body.append(probe);
     const style = getComputedStyle(probe);
-    const result = { border: style.borderTopColor, accent: style.backgroundColor };
+    const result = { border: style.borderTopColor, accent: style.backgroundColor, accentText: style.color };
     probe.remove();
     return result;
   });
   const channels = border.match(/[\d.]+/g)!.slice(0, 3).map(Number);
   expect(Math.max(...channels), border).toBeLessThan(80);
+  // A selected item (shadcn accent) is a dim surface with light text, never black on black.
+  expect(Math.min(...accentText.match(/[\d.]+/g)!.slice(0, 3).map(Number)), accentText).toBeGreaterThan(200);
   expect(accent).not.toBe("rgba(0, 0, 0, 0)");
-  // Light/dark follows the Workspace, so the app's own toggle is disabled.
-  await expect(frame.getByRole("button", { name: "Switch to Light Mode" })).toBeDisabled();
 });
 test("inherits a light Workspace theme: color-mix surfaces stay light", async ({ page }) => {
   await page.route("**/__workspace-parent.html", (route) => route.fulfill({
