@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 
 export type ThemeMode = "light" | "dark";
 
@@ -15,6 +15,26 @@ export function getInitialThemeMode(): ThemeMode {
   }
 
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function isWorkspaceThemed(): boolean {
+  return typeof document !== "undefined"
+    && document.documentElement.dataset.dynamikWorkspace === "true";
+}
+
+/**
+ * True once the Dynamik Workspace has pushed a theme: light/dark then follows
+ * the Workspace, so the app's own scheme pickers render disabled.
+ */
+export function useWorkspaceThemeLocked(): boolean {
+  const [locked, setLocked] = useState(isWorkspaceThemed);
+  useEffect(() => {
+    const update = () => setLocked(isWorkspaceThemed());
+    update();
+    window.addEventListener("dynamik-workspace-theme", update);
+    return () => window.removeEventListener("dynamik-workspace-theme", update);
+  }, []);
+  return locked;
 }
 
 export function useThemeMode() {
@@ -38,7 +58,7 @@ export function useThemeMode() {
   }, []);
 
   const toggleThemeMode = useCallback(() => {
-    if (document.documentElement.dataset.dynamikWorkspace === "true") return;
+    if (isWorkspaceThemed()) return;
     setThemeMode((currentThemeMode) => (currentThemeMode === "dark" ? "light" : "dark"));
   }, []);
 

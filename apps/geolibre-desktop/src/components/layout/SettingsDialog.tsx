@@ -101,7 +101,7 @@ import { useLanguage } from "../../hooks/useLanguage";
 import { BROWSER_PANEL_ID } from "../../hooks/useRegisterBrowserPanel";
 import { COMMENTS_PANEL_ID } from "../../hooks/useRegisterCommentsPanel";
 import { useRightPanelState } from "../../hooks/useRightPanels";
-import type { ThemeMode } from "../../hooks/useThemeMode";
+import { useWorkspaceThemeLocked, type ThemeMode } from "../../hooks/useThemeMode";
 import { isTauri } from "../../lib/is-tauri";
 import { applyRightPanelVisibility } from "../../lib/persisted-right-panel";
 import { COORDINATE_FORMATS, normalizeCoordinateFormat } from "../../lib/coordinate-format";
@@ -479,6 +479,8 @@ export function SettingsDialog({
   onToggleThemeMode,
 }: SettingsDialogProps) {
   const { t } = useTranslation();
+  // Light/dark follows the Dynamik Workspace while embedded there.
+  const themeModeLocked = useWorkspaceThemeLocked();
   // The share host's settings page, where the API token below is created.
   // Derived from the resolved host so a self-hosted deployment links to its own
   // page; null when the deployment configured no share host, in which case the
@@ -2293,12 +2295,14 @@ export function SettingsDialog({
                             key={mode}
                             type="button"
                             aria-pressed={active}
+                            disabled={themeModeLocked}
                             onClick={() => {
                               if (!active) onToggleThemeMode();
                             }}
                             className={cn(
                               "flex items-center gap-2.5 rounded-md border p-3 text-sm transition-colors",
                               active ? "border-primary ring-2 ring-ring" : "hover:bg-accent",
+                              themeModeLocked && "cursor-not-allowed opacity-60",
                             )}
                           >
                             <ModeIcon className="h-5 w-5 shrink-0" />
@@ -2325,6 +2329,7 @@ export function SettingsDialog({
                             className={cn(
                               "flex items-center gap-2.5 rounded-md border p-3 text-sm transition-colors",
                               active ? "border-primary ring-2 ring-ring" : "hover:bg-accent",
+                              themeModeLocked && "cursor-not-allowed opacity-60",
                             )}
                           >
                             <span
