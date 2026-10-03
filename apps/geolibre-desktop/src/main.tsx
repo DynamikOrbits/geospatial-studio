@@ -4,6 +4,7 @@ import "./lib/crypto-random-uuid-polyfill";
 import "./lib/maplibre-worker";
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { DEFAULT_BASEMAP } from "@geolibre/core";
 /* App typeface — see the --font-sans/--font-mono note in index.css.
    These must be imported from JS, not via `@import` in index.css: Tailwind v4
    resolves CSS @imports itself and inlines them before Vite sees them, so the
@@ -92,7 +93,10 @@ if (window.parent !== window) {
     import.meta.env.VITE_DYNAMIK_WORKSPACE_ORIGIN,
     document.referrer,
   );
-  if (workspaceOrigin) installDynamikWorkspaceAppBridge({ workspaceOrigin });
+  if (workspaceOrigin) {
+    installDynamikWorkspaceAppBridge({ workspaceOrigin });
+    followWorkspaceBasemap();
+  }
 }
 const nativeProjectOpenReady = initializeNativeProjectOpen();
 let nativeSidecarFetchReady: Promise<void> = Promise.resolve();
@@ -321,3 +325,18 @@ void Promise.all([
   .catch((error: unknown) => {
     console.error("Failed to start GeoLibre", error);
   });
+
+/**
+ * Inside the Workspace the default basemap follows its light/dark mode. A
+ * basemap the person chose is kept; the swap does not mark the project dirty.
+ */
+function followWorkspaceBasemap(): void {
+  const basemaps = { dark: DEFAULT_BASEMAP, light: "https://tiles.openfreemap.org/styles/positron" } as const;
+  window.addEventListener("dynamik-workspace-theme", (event) => {
+    const mode = (event as CustomEvent<{ colorScheme?: string }>).detail?.colorScheme;
+    if (mode !== "light" && mode !== "dark") return;
+    const current = useAppStore.getState().basemapStyleUrl;
+    if (current !== basemaps.dark && current !== basemaps.light) return;
+    if (current !== basemaps[mode]) useAppStore.setState({ basemapStyleUrl: basemaps[mode] });
+  });
+}

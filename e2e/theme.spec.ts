@@ -76,3 +76,35 @@ test("inherits a dark Workspace theme with dim borders and a valid accent", asyn
   // Light/dark follows the Workspace, so the app's own toggle is disabled.
   await expect(frame.getByRole("button", { name: "Switch to Light Mode" })).toBeDisabled();
 });
+test("inherits a light Workspace theme: color-mix surfaces stay light", async ({ page }) => {
+  await page.route("**/__workspace-parent.html", (route) => route.fulfill({
+    contentType: "text/html",
+    body: '<!doctype html><iframe title="app" src="/" style="width:100%;height:800px;border:0"></iframe>',
+  }));
+  await page.goto("/__workspace-parent.html");
+  const frame = page.frameLocator("iframe");
+  await expect(frame.getByTestId("map-canvas")).toBeVisible({ timeout: 30_000 });
+  await page.evaluate(() => document.querySelector("iframe")!.contentWindow!.postMessage({
+    source: "dynamik.workspace.app", version: 1, type: "theme.changed",
+    payload: {
+      requestId: "theme-light", colorScheme: "light", preset: "theme-dynamik", tokens: {
+        "--surface-base": "#ffffff",
+        "--surface-panel": "color-mix(in srgb, black 4%, #ffffff)",
+        "--border-default": "rgba(0, 0, 0, 0.22)",
+        "--text-primary": "rgba(0, 0, 0, 0.97)",
+      },
+    },
+  }, location.origin));
+  await expect(frame.locator("html")).not.toHaveClass(/(^|\s)dark(\s|$)/);
+  const app = page.frames().find((candidate) => candidate !== page.mainFrame())!;
+  const card = await app.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.className = "bg-card";
+    document.body.append(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return color;
+  });
+  const channels = card.match(/[\d.]+/g)!.slice(0, 3).map(Number);
+  expect(Math.min(...channels), card).toBeGreaterThan(200);
+});
