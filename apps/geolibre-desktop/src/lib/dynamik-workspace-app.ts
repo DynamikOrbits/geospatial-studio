@@ -57,16 +57,36 @@ const SHADCN_TARGETS = new Set(Object.values(SHADCN_TOKEN_MAP).flat());
 
 export type Rgba = [number, number, number, number];
 
+/**
+ * Parse a computed CSS colour. Browsers serialise `rgb()`/`rgba()` with
+ * 0-255 channels but `color(srgb …)` (from color-mix, which the Workspace
+ * surfaces use) with 0-1 channels; reading both as 0-255 turned light panels black.
+ */
+export function parseComputedColor(computed: string): Rgba | null {
+  const text = computed.trim();
+  const srgb = /^color\(srgb\s+([\d.e+-]+)\s+([\d.e+-]+)\s+([\d.e+-]+)(?:\s*\/\s*([\d.e+-]+%?))?\s*\)$/u.exec(text);
+  if (srgb) {
+    const channels = srgb.slice(1, 4).map((part) => Number(part) * 255);
+    const alphaText = srgb[4];
+    const alpha = alphaText === undefined ? 1 : alphaText.endsWith("%") ? Number(alphaText.slice(0, -1)) / 100 : Number(alphaText);
+    if (channels.some((part) => !Number.isFinite(part)) || !Number.isFinite(alpha)) return null;
+    return [channels[0]!, channels[1]!, channels[2]!, alpha];
+  }
+  if (!/^rgba?\(/u.test(text)) return null;
+  const numbers = text.match(/[\d.]+/gu)?.map(Number) ?? [];
+  if (numbers.length < 3 || numbers.slice(0, 3).some((part) => !Number.isFinite(part))) return null;
+  const [red = 0, green = 0, blue = 0, alpha = 1] = numbers;
+  return [red, green, blue, Number.isFinite(alpha) ? alpha : 1];
+}
+
 function cssColorToRgba(value: string): Rgba | null {
   const probe = document.createElement("span");
   probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none";
   probe.style.color = value;
   document.body.append(probe);
-  const numbers = getComputedStyle(probe).color.match(/[\d.]+/gu)?.map(Number) ?? [];
+  const computed = getComputedStyle(probe).color;
   probe.remove();
-  if (numbers.length < 3 || numbers.slice(0, 3).some((part) => !Number.isFinite(part))) return null;
-  const [red = 0, green = 0, blue = 0, alpha = 1] = numbers;
-  return [red, green, blue, Number.isFinite(alpha) ? alpha : 1];
+  return parseComputedColor(computed);
 }
 
 /**
