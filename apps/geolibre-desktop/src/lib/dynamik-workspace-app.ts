@@ -52,7 +52,12 @@ function isThemeMessage(value: unknown): value is {
     && typeof payload.tokens === "object";
 }
 
-function cssColorToHslChannels(value: string): string | null {
+/** Shadcn variables written as HSL channels; the raw DS token of the same name must not overwrite them. */
+const SHADCN_TARGETS = new Set(Object.values(SHADCN_TOKEN_MAP).flat());
+
+export type Rgba = [number, number, number, number];
+
+function cssColorToRgba(value: string): Rgba | null {
   const probe = document.createElement("span");
   probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none";
   probe.style.color = value;
@@ -60,7 +65,21 @@ function cssColorToHslChannels(value: string): string | null {
   const numbers = getComputedStyle(probe).color.match(/[\d.]+/gu)?.map(Number) ?? [];
   probe.remove();
   if (numbers.length < 3 || numbers.slice(0, 3).some((part) => !Number.isFinite(part))) return null;
-  const [red = 0, green = 0, blue = 0] = numbers.slice(0, 3).map((part) => part / 255);
+  const [red = 0, green = 0, blue = 0, alpha = 1] = numbers;
+  return [red, green, blue, Number.isFinite(alpha) ? alpha : 1];
+}
+
+/**
+ * HSL channels for a shadcn variable. Shadcn colours are opaque channels, so a
+ * translucent DS colour (borders are white at 22-56% in dark mode) is first
+ * composited over the surface it sits on; dropping alpha would turn every
+ * border solid white.
+ */
+export function rgbaToHslChannels([r, g, b, a]: Rgba, backdrop: Rgba = [0, 0, 0, 1]): string {
+  const alpha = Math.min(1, Math.max(0, a));
+  const [red, green, blue] = [r, g, b].map(
+    (part, index) => (part * alpha + backdrop[index]! * (1 - alpha)) / 255,
+  ) as [number, number, number];
   const max = Math.max(red, green, blue);
   const min = Math.min(red, green, blue);
   const delta = max - min;
@@ -80,13 +99,20 @@ function cssColorToHslChannels(value: string): string | null {
 function applyTheme(snapshot: ThemeSnapshot): number {
   const root = document.documentElement;
   let tokenCount = 0;
+  const base = snapshot.tokens["--surface-base"];
+  const backdrop = base && SAFE_CSS_VALUE.test(base.trim()) ? cssColorToRgba(base) ?? undefined : undefined;
   for (const [token, value] of Object.entries(snapshot.tokens)) {
     if (!THEME_TOKENS.has(token) || !SAFE_CSS_VALUE.test(value.trim())) continue;
-    root.style.setProperty(token, value);
+    // The DS `--accent` is a full colour; shadcn's `--accent` holds HSL channels
+    // (`hsl(var(--accent))`). Writing the raw token there would invalidate it.
+    if (!SHADCN_TARGETS.has(token)) root.style.setProperty(token, value);
     tokenCount += 1;
     const mappedTokens = SHADCN_TOKEN_MAP[token];
-    const hsl = mappedTokens ? cssColorToHslChannels(value) : null;
-    if (hsl && mappedTokens) for (const target of mappedTokens) root.style.setProperty(target, hsl);
+    const rgba = mappedTokens ? cssColorToRgba(value) : null;
+    if (rgba && mappedTokens) {
+      const hsl = rgbaToHslChannels(rgba, backdrop);
+      for (const target of mappedTokens) root.style.setProperty(target, hsl);
+    }
   }
   root.classList.toggle("dark", snapshot.colorScheme === "dark");
   root.style.colorScheme = snapshot.colorScheme;

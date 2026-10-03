@@ -101,7 +101,7 @@ import { useOsmPbfLoader } from "../../hooks/useOsmPbfLoader";
 import type { ProjectFileActions } from "../../hooks/useProjectFileActions";
 import { useToolbarPanels } from "../../hooks/useToolbarPanels";
 import { useVectorTileGeometryBackfill } from "../../hooks/useVectorTileGeometryBackfill";
-import type { ThemeMode } from "../../hooks/useThemeMode";
+import { useWorkspaceThemeLocked, type ThemeMode } from "../../hooks/useThemeMode";
 import { isMobile } from "../../lib/is-mobile";
 import { isTauri } from "../../lib/tauri-io";
 import { BrandMark } from "../../branding/BrandMark";
@@ -229,6 +229,8 @@ export function TopToolbar({
   viewer = false,
 }: TopToolbarProps) {
   const { t, i18n } = useTranslation();
+  // Light/dark follows the Dynamik Workspace while embedded there.
+  const themeModeLocked = useWorkspaceThemeLocked();
   const deploymentCapabilities = useAppStore((state) => state.deploymentCapabilities);
   const appPrivileges = useAppStore((state) => state.capabilities.privileges);
   // The reverse-geocode plugin lives in the framework-agnostic plugins package
@@ -2318,6 +2320,7 @@ export function TopToolbar({
               : t("toolbar.command.switchToDark")
           }
           className="h-7 w-7 shrink-0"
+          disabled={themeModeLocked}
           onClick={onToggleThemeMode}
           size="icon"
           title={
