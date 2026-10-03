@@ -4,7 +4,7 @@ import "./lib/crypto-random-uuid-polyfill";
 import "./lib/maplibre-worker";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { DEFAULT_BASEMAP, useAppStore } from "@geolibre/core";
+import { DEFAULT_BASEMAP } from "@geolibre/core";
 /* App typeface — see the --font-sans/--font-mono note in index.css.
    These must be imported from JS, not via `@import` in index.css: Tailwind v4
    resolves CSS @imports itself and inlines them before Vite sees them, so the
